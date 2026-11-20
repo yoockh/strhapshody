@@ -19,7 +19,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 - [x] 1.1 Integrate `@mediapipe/tasks-vision` HandLandmarker, draw both hands' landmarks as an
       overlay on the canvas.
-- [ ] 1.2 Handedness assignment (MediaPipe handedness + screen-side fallback per PRD §13),
+- [x] 1.2 Handedness assignment (MediaPipe handedness + screen-side fallback per PRD §13),
       left/right zone split rendered, status bar skeleton (chord/mode/instrument/tracking
       health placeholders).
 - [ ] 1.3 One Euro filter smoothing as a Rust/WASM `smoothing` module; `cargo test` with

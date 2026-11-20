@@ -156,3 +156,40 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   inference + the live blit can't run in this camera-less env. Also: the CDN wasm/model fetch
   (ADR-0005) needs a real online browser to confirm it loads. Both belong on the Phase 7.3 manual
   checklist, and the full pipeline gets a deterministic exercise in the Playwright suite (7.1).
+
+## 2026-11-20 22:05 WIB — task 1.2 handedness assignment + zone split + status bar skeleton
+
+- did: implemented left/right hand role assignment and the HUD skeleton, keeping the testable
+  logic pure (ADR-0002 / handoverlay.ts precedent) and the DOM drawing thin:
+  * `src/handedness.ts` — PURE, unit-tested: `assignHands()` maps detected hands to the chord
+    (left zone) and strum (right zone) roles per PRD §5/§13. PRIMARY signal is MediaPipe
+    handedness; because we feed RAW unmirrored frames to MediaPipe while the display is mirrored,
+    the labels are swapped to recover the user's real hand (`DEFAULT_HANDEDNESS_ROLE`: MediaPipe
+    "Right"→chord, "Left"→strum — one constant to flip if it's backwards on real hardware).
+    BACKUP signal is screen-side position (leftmost hand → chord), used whenever handedness is
+    unreliable: a label below `minScore` (default 0.6) or both hands reporting the same label
+    (the hands-crossed failure mode). Guarantees two hands never collapse into the same role.
+    Also `representativeX()` (palm-centre x from wrist+middle-MCP) and `roleIsTracked()`.
+  * `src/hud.ts` — `trackingSummary()` (PURE, unit-tested: assignments → per-role flags + a
+    one-line health label) plus thin DOM `drawZoneSplit()` (cool/warm zone tints + an accent
+    highlight on whichever zone currently has a tracked hand) and `drawStatusBar()` (top bar with
+    CHORD / MODE / INSTRUMENT / TRACKING fields).
+  * `src/main.ts` — adapts each MediaPipe result into pure `RawHand[]` (`toRawHands`), runs
+    `assignHands` per frame, highlights the active zone(s), and renders the status bar. Chord
+    ("—") and instrument ("Acoustic") are placeholders for Phases 3/5; mode is "Chord"; tracking
+    health is live (camera off / starting / loading tracker / no hands / left only / right only /
+    both hands).
+- tested: `npm run typecheck` exit 0; `npm run test` → 6 files / 42 tests pass (+18: 14 in
+  `handedness.test.ts` covering nominal handedness assignment, same-label and low-confidence
+  screen-side fallback, single-hand both paths, mirror/roleMap/minScore options, and the no-role
+  collapse guarantee; 4 in `hud.test.ts` covering every tracking-health label); `npm run build`
+  clean (13 modules, 136 kB / 43 kB gzip); `npm run test:engine` → cargo 2 passed / 0 failed. No
+  faked passes.
+- next: task 1.3 — One Euro filter smoothing as a Rust/WASM `smoothing` module with `cargo test`
+  over synthetic jittery input sequences (first real engine logic module).
+- needs human verification: the MediaPipe→user-hand mirror swap in `DEFAULT_HANDEDNESS_ROLE`
+  can't be confirmed without a real camera + real hands — if the chord/strum zones feel swapped,
+  flip that one constant (the screen-side backup is already correct by construction and matches
+  §5). Also the look of the zone tints, active-zone highlight, and status bar needs a real
+  browser eyeball. Both belong on the Phase 7.3 manual checklist; the pipeline gets a
+  deterministic exercise in the Playwright suite (7.1).
