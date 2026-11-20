@@ -193,3 +193,29 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   §5). Also the look of the zone tints, active-zone highlight, and status bar needs a real
   browser eyeball. Both belong on the Phase 7.3 manual checklist; the pipeline gets a
   deterministic exercise in the Playwright suite (7.1).
+
+## 2026-11-20 22:15 WIB — task 1.3 One Euro filter smoothing (Rust/WASM `smoothing` module)
+
+- did: implemented the first real engine logic module, `engine/src/smoothing.rs` — the One Euro
+  adaptive low-pass filter (Casiez et al., CHI 2012) for the jittery hand-landmark signal. Split
+  into a private `LowPass` (single exponential smoother, first sample passes through to seed),
+  `smoothing_alpha(cutoff, te)` helper, a pure wasm-free core `OneEuro` (new/filter/reset), and a
+  thin `#[wasm_bindgen] OneEuroFilter` wrapper. Design + contract recorded as ADR-0006: one filter
+  instance per scalar stream (frontend makes one per coordinate), timestamps in **seconds**,
+  non-decreasing with a nominal-60 Hz fallback so a non-advancing/first/backwards timestamp can't
+  divide by zero, and sanitization of non-finite samples + non-positive/NaN config so live garbage
+  never yields NaN output. Exported from `lib.rs` via `pub mod smoothing` + `pub use`.
+- tested: `cd engine && cargo test` → 12 passed / 0 failed (was 2; +10 smoothing tests):
+  first-sample pass-through, constant-signal convergence, **variance cut to <25% of raw** on a
+  synthetic xorshift-jitter stream (the "noise reduction" proof), **bounded steady-state lag on a
+  ramp** and **higher-beta-lags-less on fast motion** (the "without excessive lag" proof), plus
+  edge cases: non-increasing timestamp (no div-by-zero), non-finite sample ignored + recovery,
+  bad-config sanitization, reset re-seeding, and alpha-in-(0,1]. `npm run build:engine` → wasm
+  compiles clean and `engine/pkg/engine.d.ts` now exports `class OneEuroFilter`. `npm run test`
+  → 6 files / 42 tests still pass (frontend untouched). No faked passes.
+- next: task 2.1 — render six virtual string lines in the right (strum) zone.
+- needs human verification: the *feel* of the chosen default filter params (how smooth vs. laggy
+  the cursor feels in the hand) can only be judged with a real camera + hands; min_cutoff/beta are
+  correct by construction and provably reduce noise without runaway lag in unit tests, but the
+  tuning sweet spot is a Phase 6.2 sensitivity-slider + Phase 7.3 manual-checklist item. The filter
+  isn't wired into the live render loop yet (no UI task consumes it until the cursor work).

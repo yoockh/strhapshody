@@ -22,7 +22,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 - [x] 1.2 Handedness assignment (MediaPipe handedness + screen-side fallback per PRD §13),
       left/right zone split rendered, status bar skeleton (chord/mode/instrument/tracking
       health placeholders).
-- [ ] 1.3 One Euro filter smoothing as a Rust/WASM `smoothing` module; `cargo test` with
+- [x] 1.3 One Euro filter smoothing as a Rust/WASM `smoothing` module; `cargo test` with
       synthetic jittery input sequences proving noise reduction without excessive lag.
 
 ## Phase 2 — Right hand strumming

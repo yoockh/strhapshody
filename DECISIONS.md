@@ -112,3 +112,30 @@ same-origin URLs) — the `handtracking.ts` constants are the only thing that ch
 thin and unit-test-free; all the load-bearing, verifiable logic — mapping normalized landmarks
 through the cover-crop + mirror transform, and the hand-skeleton connection topology — lives in
 the pure `handoverlay.ts` module and is covered by `cargo`-style synthetic unit tests under vitest.
+
+## ADR-0006: One Euro smoothing is a per-scalar stateful filter, timestamps in seconds
+
+**Context:** task 1.3 is the first real engine logic module — One Euro filter smoothing for the
+noisy hand-landmark signal. Two API-shape questions had to be settled: (a) does one filter
+instance smooth a whole landmark (a vector) or a single scalar; (b) what units/contract do
+timestamps follow, given MediaPipe hands us `performance.now()` milliseconds per frame.
+
+**Decision:** the engine exports `OneEuroFilter` as a **stateful** `#[wasm_bindgen]` struct
+(`new OneEuroFilter(minCutoff, beta, dCutoff)`, `.filter(x, timestamp)`, `.reset()`) that smooths
+**one scalar stream**. The frontend creates one instance per coordinate it wants smoothed (e.g. an
+x and a y for a palm-centre point). Rationale: scalar is the simplest fully-testable primitive, it
+composes trivially into any dimensionality, and it avoids baking a fixed landmark layout or an
+array-marshalling convention into the wasm boundary this early. The pure core (`OneEuro`, no
+wasm-bindgen) is separate from the exported wrapper so it's reusable and testable from native Rust.
+
+Timestamps are **seconds** (the frontend divides `performance.now()` by 1000 before calling).
+Seconds make the cutoff-frequency math read in natural Hz units. The filter requires non-decreasing
+timestamps; a non-advancing/first/backwards timestamp falls back to a nominal 60 Hz period instead
+of dividing by zero. Non-finite samples and non-positive/NaN config are sanitized so live garbage
+can never produce NaN output — important for an unattended agent feeding it real tracker data.
+
+**Consequences:** `reset()` must be called when tracking is lost so the next sample re-seeds
+instead of lerping from a stale position (the UI integration in a later phase will wire that to the
+hand-presence signal). If a future phase needs to smooth many coordinates cheaply in one call, add
+a vector/batch export then rather than reshaping this scalar one — this ADR isn't superseded by
+adding a complementary batch API, only by changing the scalar contract itself.
