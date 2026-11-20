@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+
+# Rust/wasm build artifacts (engine/ scaffolded in task 0.2)
+engine/target/
+engine/pkg/

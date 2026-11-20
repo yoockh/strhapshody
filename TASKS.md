@@ -5,7 +5,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 ## Phase 0 — Scaffold
 
-- [ ] 0.1 Vite + TypeScript scaffold: dev server runs, blank mirrored canvas showing webcam
+- [x] 0.1 Vite + TypeScript scaffold: dev server runs, blank mirrored canvas showing webcam
       feed placeholder (can be a static test pattern until 0.4).
 - [ ] 0.2 Rust `engine/` crate scaffold, wasm-pack build config, a trivial exported function
       with a round-trip test from TS (prove the WASM pipeline works end to end) + `cargo test`
