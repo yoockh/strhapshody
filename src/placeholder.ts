@@ -1,16 +1,19 @@
 /**
- * Static webcam placeholder (task 0.1).
+ * Webcam placeholder + overlays (tasks 0.1 / 0.4).
  *
- * Until task 0.4 wires up getUserMedia, we draw a simple, deterministic test
- * pattern where the live mirrored webcam feed will later go. It is split into
- * two parts so the mirroring behaviour matches the real feed:
+ * `drawFeedPattern` is the deterministic stand-in feed used whenever there is
+ * no live camera frame to show yet — while the camera is still starting, or
+ * after it failed. As of task 0.4 the real mirrored webcam feed (see
+ * `videoframe.drawVideoCover`) replaces it on the happy path.
  *
  *  - `drawFeedPattern` is drawn through Stage.withMirroredFeed, i.e. flipped
- *    left-to-right, exactly as the webcam frames will be. It paints vertical
+ *    left-to-right, exactly as the webcam frames are. It paints vertical
  *    colour bars plus a corner "mirror check" wedge so the horizontal flip is
  *    visually obvious.
  *  - `drawZoneOverlay` is drawn un-mirrored on top: the left/right zone
- *    divider and labels, so text stays readable.
+ *    divider, labels, and an optional status caption, so text stays readable.
+ *  - `drawErrorBanner` is drawn un-mirrored on top of everything: a centred
+ *    message box for the graceful "no camera / permission denied" path.
  */
 
 const BAR_COLORS = [
@@ -53,6 +56,7 @@ export function drawZoneOverlay(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
+  caption?: string,
 ): void {
   const midX = width / 2;
 
@@ -74,12 +78,108 @@ export function drawZoneOverlay(
   ctx.fillText("LEFT HAND · chords", midX / 2, height * 0.5);
   ctx.fillText("RIGHT HAND · strum", midX + midX / 2, height * 0.5);
 
-  // Status caption.
-  ctx.fillStyle = "rgba(232, 234, 237, 0.55)";
-  ctx.font = `${Math.round(height * 0.022)}px system-ui, sans-serif`;
-  ctx.fillText(
-    "webcam placeholder — real camera arrives in task 0.4",
-    midX,
-    height * 0.92,
-  );
+  // Optional status caption (e.g. "starting camera…"). Omitted once the live
+  // feed is showing, so we don't label a real camera frame as a placeholder.
+  if (caption) {
+    ctx.fillStyle = "rgba(232, 234, 237, 0.55)";
+    ctx.font = `${Math.round(height * 0.022)}px system-ui, sans-serif`;
+    ctx.fillText(caption, midX, height * 0.92);
+  }
+}
+
+/**
+ * Draw a centred, un-mirrored error banner (graceful camera-failure path,
+ * task 0.4). Word-wraps `message` to fit the box. Uses ctx.measureText, so it
+ * only runs at render time against a real 2D context.
+ */
+export function drawErrorBanner(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  title: string,
+  message: string,
+): void {
+  const boxW = Math.min(width * 0.82, 560);
+  const pad = Math.max(16, boxW * 0.05);
+  const titleSize = Math.round(Math.min(width, height) * 0.038);
+  const bodySize = Math.round(Math.min(width, height) * 0.026);
+  const lineGap = bodySize * 1.4;
+
+  // Wrap the message to the inner width.
+  ctx.font = `${bodySize}px system-ui, sans-serif`;
+  const lines = wrapText(ctx, message, boxW - pad * 2);
+
+  const contentH = titleSize + lineGap * 0.6 + lines.length * lineGap;
+  const boxH = contentH + pad * 2;
+  const boxX = (width - boxW) / 2;
+  const boxY = (height - boxH) / 2;
+
+  // Panel.
+  ctx.fillStyle = "rgba(20, 10, 10, 0.88)";
+  ctx.strokeStyle = "rgba(232, 92, 92, 0.9)";
+  ctx.lineWidth = 2;
+  roundedRect(ctx, boxX, boxY, boxW, boxH, 12);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+
+  // Title.
+  ctx.fillStyle = "rgba(255, 180, 180, 0.95)";
+  ctx.font = `700 ${titleSize}px system-ui, sans-serif`;
+  let y = boxY + pad;
+  ctx.fillText(title, width / 2, y);
+  y += titleSize + lineGap * 0.6;
+
+  // Body.
+  ctx.fillStyle = "rgba(232, 234, 237, 0.92)";
+  ctx.font = `${bodySize}px system-ui, sans-serif`;
+  for (const line of lines) {
+    ctx.fillText(line, width / 2, y);
+    y += lineGap;
+  }
+}
+
+/** Greedy word-wrap against the given max width using the ctx's current font. */
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) {
+    lines.push(current);
+  }
+  return lines.length ? lines : [text];
+}
+
+/** Trace a rounded rectangle path (fill/stroke left to the caller). */
+function roundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
 }

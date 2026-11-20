@@ -12,7 +12,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       passing on a dummy unit test.
 - [x] 0.3 Test tooling wired up: `npm run test` (vitest) and `cargo test` both runnable and
       documented in `TESTING.md`; add a `package.json` script `test:all` that runs both.
-- [ ] 0.4 Real webcam capture via `getUserMedia`, mirrored on canvas, graceful error if no
+- [x] 0.4 Real webcam capture via `getUserMedia`, mirrored on canvas, graceful error if no
       camera permission.
 
 ## Phase 1 — Hand tracking foundation

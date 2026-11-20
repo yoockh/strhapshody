@@ -94,3 +94,30 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   Note: `npm install` again warned esbuild's postinstall was blocked by npm 12's allowScripts
   gate — same harmless case as 0.2; vitest ran fine. The `test:e2e` command named in
   `TESTING.md` is still a forward reference (Playwright script lands in task 7.1).
+
+## 2026-11-20 21:50 WIB — task 0.4 real webcam capture (getUserMedia, mirrored, graceful error)
+
+- did: wired up live camera capture replacing the static placeholder feed. New `src/webcam.ts`:
+  `startWebcam()` requests `getUserMedia` (720p ideal, front camera, audio off), drives a hidden
+  `<video>`, waits for real frame dimensions (loadedmetadata), and exposes `stop()` (releases all
+  tracks, idempotent); `describeCameraError()` maps DOMException names (NotAllowedError,
+  NotFoundError, NotReadableError, Overconstrained, Abort, legacy aliases) to short actionable
+  sentences, falling back to the error message then a generic catch-all. New `src/videoframe.ts`:
+  pure `computeCoverCrop()` (aspect-correct "cover" fit — fill canvas, crop overflow, centred, no
+  stretch/letterbox) + thin DOM `drawVideoCover()` wrapper. `src/placeholder.ts`: `drawZoneOverlay`
+  now takes an optional caption (so a real feed isn't captioned "placeholder") and added
+  `drawErrorBanner` (centred, word-wrapped red panel for the no-camera path). `src/main.ts` now
+  has three render states — starting (placeholder + "starting camera…"), live (mirrored video via
+  withMirroredFeed), failed (placeholder + error banner) — and stops the camera on beforeunload.
+- tested: `npm run typecheck` exit 0; `npm run test` → 3 files / 16 tests pass (added
+  `src/webcam.test.ts` covering every error branch incl. non-object/null throws, and
+  `src/videoframe.test.ts` covering cover-fit math incl. portrait-canvas and degenerate-zero
+  cases); `npm run build` clean (8 modules); `npm run test:engine` → cargo 2 passed/0 failed. No
+  faked passes. The async getUserMedia path + actual video→canvas blit are DOM/camera-bound and
+  are deferred to the Playwright e2e suite (task 7.1) with a fake media device, per TESTING.md.
+- next: task 1.1 — integrate `@mediapipe/tasks-vision` HandLandmarker and draw both hands'
+  landmarks as an overlay on the canvas.
+- needs human verification: the live mirrored feed, "cover" framing, and the permission-denied
+  banner all need a real webcam + a real allow/deny prompt to eyeball — correct by construction
+  (pure logic unit-tested, build + typecheck green) but not visually confirmed without a camera.
+  Belongs on the Phase 7.3 manual checklist for Yaya.
