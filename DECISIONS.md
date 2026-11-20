@@ -83,3 +83,32 @@ pipeline is provable before the frontend test runner exists. `scripts/` is outsi
 Future frontend code initializes the engine once at startup (`await init()` with the wasm URL)
 before calling exported functions. If a later Vite-integration task prefers the `bundler` target,
 supersede this ADR rather than editing it.
+
+## ADR-0005: MediaPipe runtime assets (wasm fileset + model) loaded from CDN, not vendored
+
+**Context:** task 1.1 integrates `@mediapipe/tasks-vision` HandLandmarker. The npm package ships
+the JS loader + TypeScript types, but the actual vision WASM runtime
+(`vision_wasm_internal.{js,wasm}`) and the hand-landmark model (`hand_landmarker.task`, several
+MB) are *not* in the package — they must be supplied at runtime via `FilesetResolver.forVisionTasks(basePath)`
+and `baseOptions.modelAssetPath`.
+
+**Decision:** load both from their canonical CDNs at runtime — the wasm fileset from jsDelivr,
+pinned to the installed package version (`@mediapipe/tasks-vision@0.10.35/wasm`), and the model
+from Google's `storage.googleapis.com/mediapipe-models/...` path. This matches MediaPipe's
+documented web setup. Rationale over vendoring: (a) home internet is slow (~30-70 KB/s, see
+ADR-0001) so fetching + committing multi-MB binaries now is costly and bloats the repo; (b) these
+assets only load in a real browser with a camera, which this execution environment doesn't have,
+so they can't be exercised here regardless of where they live; (c) the URLs are version-pinned so
+the loader and binaries stay in sync.
+
+**Consequences:** the app needs network access on first run to fetch the wasm + model (they're
+then HTTP-cached by the browser). Hand-tracking init is wrapped in a `.catch` in `main.ts`: if the
+assets can't load (offline), the app keeps showing the mirrored feed without a landmark overlay
+rather than failing. If an offline/air-gapped build is ever required, supersede this ADR with a
+vendor-and-serve-locally approach (download into `public/`, point `basePath`/`modelAssetPath` at
+same-origin URLs) — the `handtracking.ts` constants are the only thing that changes.
+
+**Testability note (ADR-0002 split):** the WASM-bound tracker (`handtracking.ts`) is deliberately
+thin and unit-test-free; all the load-bearing, verifiable logic — mapping normalized landmarks
+through the cover-crop + mirror transform, and the hand-skeleton connection topology — lives in
+the pure `handoverlay.ts` module and is covered by `cargo`-style synthetic unit tests under vitest.

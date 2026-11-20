@@ -121,3 +121,38 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   banner all need a real webcam + a real allow/deny prompt to eyeball — correct by construction
   (pure logic unit-tested, build + typecheck green) but not visually confirmed without a camera.
   Belongs on the Phase 7.3 manual checklist for Yaya.
+
+## 2026-11-20 21:55 WIB — task 1.1 MediaPipe HandLandmarker + landmark overlay
+
+- did: installed `@mediapipe/tasks-vision@0.10.35` (npm install succeeded fast this time despite
+  the slow-link worry; esbuild postinstall still blocked by npm 12 allowScripts — harmless, same
+  as prior sessions). Integrated HandLandmarker following the ADR-0002 testability split:
+  * `src/handtracking.ts` — thin WASM/browser wrapper: `createHandTracker()` loads the vision
+    fileset (jsDelivr, version-pinned) + hand model (Google storage) and configures VIDEO mode,
+    numHands=2; `detect(video, ts)` guards against non-increasing timestamps (MediaPipe VIDEO
+    requirement) and zero-dim frames, returning null instead of throwing; `close()` idempotent.
+    NOT unit-tested (needs WASM + camera) — deferred to e2e/human, per ADR-0002.
+  * `src/handoverlay.ts` — PURE, unit-tested: `HAND_CONNECTIONS` (canonical 21-point hand
+    skeleton, defined locally so the module stays WASM-free), `landmarkToCanvas()` mapping a
+    normalized landmark through the SAME cover-crop (`computeCoverCrop`) + horizontal mirror used
+    to blit the feed, so dots land on the hand in the mirrored image; plus the thin DOM
+    `drawHandLandmarks()` wrapper (bones then joints).
+  * `src/main.ts` — creates the tracker in the background after the camera is live (failure just
+    skips the overlay, never breaks the render loop or the feed), runs detection per frame with
+    `performance.now()` timestamps, caches the last result, and draws the un-mirrored overlay
+    (mirror is baked into the coords). Closes the tracker on beforeunload.
+  Recorded the CDN-vs-vendor asset choice as ADR-0005.
+- tested: `npm run typecheck` exit 0; `npm run test` → 4 files / 24 tests pass (added
+  `src/handoverlay.test.ts`: 8 tests covering connection-index validity, skeleton connectivity
+  via BFS from the wrist, centre→centre mapping, mirror reflection, cover-crop consistency on a
+  portrait canvas, off-canvas cropped landmarks not clamped, and degenerate-dim → origin guards);
+  `npm run build` clean (11 modules, 133 kB / 41 kB gzip); `npm run test:engine` → cargo 2
+  passed/0 failed. No faked passes.
+- next: task 1.2 — handedness assignment (MediaPipe handedness + screen-side fallback per PRD
+  §13), left/right zone split rendered, status bar skeleton.
+- needs human verification: real HandLandmarker tracking accuracy and whether the drawn skeleton
+  actually lands on the hand (incl. the mirror being the right way round) need a real webcam +
+  real hands — the coordinate math is unit-tested and correct by construction, but MediaPipe
+  inference + the live blit can't run in this camera-less env. Also: the CDN wasm/model fetch
+  (ADR-0005) needs a real online browser to confirm it loads. Both belong on the Phase 7.3 manual
+  checklist, and the full pipeline gets a deterministic exercise in the Playwright suite (7.1).
