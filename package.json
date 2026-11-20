@@ -10,10 +10,15 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "build:engine": "wasm-pack build engine --target web --out-dir pkg",
-    "roundtrip:engine": "npm run build:engine && node scripts/engine-roundtrip.ts"
+    "roundtrip:engine": "npm run build:engine && node scripts/engine-roundtrip.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:engine": "cd engine && cargo test",
+    "test:all": "npm run test:engine && npm run test"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^5.1.1"
   }
 }

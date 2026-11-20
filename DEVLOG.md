@@ -71,3 +71,26 @@ Note for next session: `npm install` warned that esbuild's postinstall script wa
 npm 12's allowScripts gate — harmless here, vite 6 resolves the esbuild platform binary via
 optionalDependencies and both build and dev server work. If a future esbuild error appears, run
 `npm install-scripts approve esbuild` (or equivalent) to unblock it.
+
+## 2026-11-20 21:46 WIB — task 0.3 test tooling (vitest + cargo + test:all)
+
+- did: installed `vitest` (^5.1.1) as a dev dependency and wired up the TS test harness
+  (ADR-0004's round-trip stays a standalone script, unchanged). Added `vitest.config.ts`
+  (node env, `include: src/**/*.test.ts`, excludes `engine`/`scripts`/e2e so the WASM
+  round-trip and the future Playwright suite don't get swept in). Added `package.json`
+  scripts: `test` (`vitest run`), `test:watch`, `test:engine` (`cd engine && cargo test`), and
+  `test:all` (engine then vitest). Wrote the first TS-glue unit test `src/stage.test.ts` — it
+  proves the harness resolves `.ts` ESM imports of app source AND exercises a real camera-free
+  branch (the `createStage` guard that throws when the 2D context is unavailable), so it isn't
+  a vacuous smoke test. `TESTING.md` already documented both suites + `test:all`; it's now
+  accurate rather than aspirational.
+- tested: `npm run test` → 1 file / 1 test passed. `npm run test:all` → cargo test 2 passed +
+  0 failed (and 0 doctests), then vitest 1 passed. `npm run typecheck` → exit 0 (tsc now also
+  typechecks the new `*.test.ts` under `src/`, resolves `vitest` types fine). `npm run build`
+  → clean (test file is not pulled into the `index.html` entry bundle). No faked passes.
+- next: task 0.4 — real webcam capture via `getUserMedia`, mirrored on the canvas (replacing
+  the placeholder feed layer), with a graceful error path when camera permission is denied.
+- needs human verification: none (pure tooling + a logic-branch test, fully machine-verifiable).
+  Note: `npm install` again warned esbuild's postinstall was blocked by npm 12's allowScripts
+  gate — same harmless case as 0.2; vitest ran fine. The `test:e2e` command named in
+  `TESTING.md` is still a forward reference (Playwright script lands in task 7.1).

@@ -10,7 +10,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 - [x] 0.2 Rust `engine/` crate scaffold, wasm-pack build config, a trivial exported function
       with a round-trip test from TS (prove the WASM pipeline works end to end) + `cargo test`
       passing on a dummy unit test.
-- [ ] 0.3 Test tooling wired up: `npm run test` (vitest) and `cargo test` both runnable and
+- [x] 0.3 Test tooling wired up: `npm run test` (vitest) and `cargo test` both runnable and
       documented in `TESTING.md`; add a `package.json` script `test:all` that runs both.
 - [ ] 0.4 Real webcam capture via `getUserMedia`, mirrored on canvas, graceful error if no
       camera permission.
