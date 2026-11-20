@@ -45,6 +45,28 @@ Append-only running log, newest entry at the bottom. One entry per work session.
 - needs human verification: visual look of the placeholder/mirroring in a real browser window is
   best eyeballed by a human, but it is correct by construction (build + dev-server probes green).
 
+## 2026-11-20 23:05 WIB — task 0.2 Rust engine crate + WASM round-trip
+
+- did: scaffolded the `engine/` Rust crate (ADR-0002/0004): `engine/Cargo.toml`
+  (`crate-type = ["cdylib", "rlib"]` so the same source both compiles to wasm and runs under
+  native `cargo test`; `wasm-bindgen = "0.2"`; release profile `opt-level="s"` + lto for small
+  browser wasm) and `engine/src/lib.rs` with two trivial `#[wasm_bindgen]` exports — `add(i32,i32)`
+  (primitive round-trip) and `engine_version()->String` (heap/String round-trip) — each with a
+  native unit test. Added `npm run build:engine` (`wasm-pack build engine --target web --out-dir
+  pkg`) and `npm run roundtrip:engine`, plus `scripts/engine-roundtrip.ts`, a standalone
+  `node:assert` script that imports `engine/pkg/engine.js`, inits the wasm from disk bytes via
+  `initSync`, and asserts the exported functions return correct values across the JS/WASM boundary.
+  Recorded the target/test-style choice as ADR-0004. `engine/pkg/` + `engine/target/` already
+  gitignored (from 0.1); `engine/Cargo.lock` committed for reproducible builds.
+- tested: `cd engine && cargo test` → 2 passed, 0 failed (plus 0 doctests). `npm run
+  roundtrip:engine` → builds the wasm then prints "✅ engine WASM round-trip OK — add(2,3)=5,
+  engine_version()=\"0.1.0\"", proving the Rust→wasm-pack→TS pipeline end to end. `npm run
+  typecheck` still exits 0 (frontend untouched). No faked passes.
+- next: task 0.3 — wire `npm run test` (vitest) and document both suites; add a `test:all` script
+  running `cargo test` + `npm run test` (and fold the engine round-trip into the test flow).
+- needs human verification: none (pure logic + build-tool pipeline, fully machine-verifiable).
+  Note: `wasm-pack` must be on PATH (it is, via `~/.cargo/bin`); `build:engine` assumes this.
+
 Note for next session: `npm install` warned that esbuild's postinstall script was blocked by
 npm 12's allowScripts gate — harmless here, vite 6 resolves the esbuild platform binary via
 optionalDependencies and both build and dev server work. If a future esbuild error appears, run

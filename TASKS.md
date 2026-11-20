@@ -7,7 +7,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 - [x] 0.1 Vite + TypeScript scaffold: dev server runs, blank mirrored canvas showing webcam
       feed placeholder (can be a static test pattern until 0.4).
-- [ ] 0.2 Rust `engine/` crate scaffold, wasm-pack build config, a trivial exported function
+- [x] 0.2 Rust `engine/` crate scaffold, wasm-pack build config, a trivial exported function
       with a round-trip test from TS (prove the WASM pipeline works end to end) + `cargo test`
       passing on a dummy unit test.
 - [ ] 0.3 Test tooling wired up: `npm run test` (vitest) and `cargo test` both runnable and
