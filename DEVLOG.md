@@ -286,3 +286,37 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   the hand-point source + the smoothing/reset wiring land with the audio/cursor work). Real strum
   *feel* (does a natural hand sweep fire the strings cleanly, missed-strum rate <5% per PRD §10)
   needs a real camera + hands and belongs on the Phase 7.3 manual checklist.
+
+## 2026-11-21 19:48 WIB — task 2.3 palm-mute / fist-stop gesture detection (Rust/WASM `gesture`)
+
+- did: implemented the right-hand shape classifier `engine/src/gesture.rs` (PRD §8), the first
+  engine module to consume a whole hand's 21 MediaPipe landmarks. Follows the ADR-0002 pure-core
+  + thin-wasm-wrapper pattern. A hand crosses the boundary as a flat `&[f64]` of 42 interleaved
+  `x, y` values (a `Float64Array`); only image-plane x,y are used. Each finger (index/middle/ring/
+  pinky; thumb intentionally excluded) is judged by a **straightness ratio** `dist(MCP,TIP) /
+  (seg MCP-PIP + PIP-DIP + DIP-TIP)` — ~1 straight, →0 curled — which is translation/scale/
+  rotation invariant so no hand-size calibration is needed. Extended at ratio ≥ 0.80, curled at
+  ≤ 0.60, dead zone between so a half-open hand is `Neutral`. `classify_shape` → `HandShape`
+  {Neutral, OpenPalm (all four extended → palm mute), Fist (all four curled → stop)}; wrong-length
+  / non-finite input → Neutral, never panics. Wrapped in a stateful `GestureCore`/`GestureDetector`
+  with a debounce (`hold_frames` default 3) + `reset()`, matching the strum/smoothing stateful-
+  detector pattern. Exported from lib.rs: `GestureDetector`, `HandShape`, free fn `classifyHandShape`.
+  Recorded the landmark-array boundary convention + straightness metric + thresholds as ADR-0008.
+- tested: `cd engine && cargo test` → 43 passed / 0 failed (was 28; +15 gesture tests): straight-
+  finger ratio ~1, curled-finger ratio < 0.60, open-palm = all extended, fist = all curled, three
+  partial-hand Neutral cases, wrong-length Neutral, non-finite Neutral, degenerate coincident-joint
+  no-crash Neutral, a rotate+scale+translate invariance test on a fist, and debounce behaviour
+  (needs hold_frames to commit, rejects a single noisy frame, switches on sustained change,
+  hold_frames=0→1 immediate, reset→Neutral, lost-hand decays to Neutral). `npm run build:engine`
+  → wasm compiles clean; `engine/pkg/engine.d.ts` now exports `class GestureDetector`,
+  `enum HandShape`, and `function classifyHandShape(...)`. `npm run test` → 7 files / 53 tests still
+  pass (frontend untouched); `npm run typecheck` exit 0. No faked passes.
+- next: task 2.4 — Web Audio engine skeleton: 6 string voices, a single hardcoded test chord,
+  pluck synthesis wired to the strum events from 2.2 (placeholder timbre fine until Phase 5). The
+  gesture detector gets wired in there too (palm-mute shortens/dulls, fist silences), with
+  `.reset()` on right-hand tracking loss.
+- needs human verification: none for the pure logic (fully cargo-tested, deterministic). The real
+  *feel* — whether a natural flat palm reliably reads as OpenPalm and a real fist as Fist on live
+  MediaPipe landmarks, the right thresholds/hold_frames, and whether excluding the thumb is correct
+  in practice — needs a real camera + hands; belongs on the Phase 6.2 tuning + Phase 7.3 manual
+  checklist. The detector isn't in the live render loop yet (2.4 consumes it for audio).

@@ -31,7 +31,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 - [x] 2.2 Rust/WASM `strum` module: line-crossing detection, direction (up/down), velocity from
       a landmark trajectory; `cargo test` with synthetic up/down/slow/fast trajectories
       covering edge cases (near-miss, double-cross in one frame).
-- [ ] 2.3 Palm-mute (open flat palm over strings) and fist-stop (closed fist) gesture
+- [x] 2.3 Palm-mute (open flat palm over strings) and fist-stop (closed fist) gesture
       detection from landmark geometry; unit tests with synthetic hand-shape landmark sets.
 - [ ] 2.4 Web Audio engine skeleton: 6 string voices, a single hardcoded test chord, pluck
       synthesis wired to strum events from 2.2 (placeholder timbre is fine here, real

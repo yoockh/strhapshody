@@ -171,3 +171,39 @@ voice triggers. If a future phase needs sub-frame crossing *timestamps* per stri
 rake timing than one velocity-per-step), extend `StrumEvent` with a per-crossing time rather than
 reshaping the push contract — this ADR is superseded only by changing the `(y,ts) → events` shape or
 the crossing-interval convention itself.
+
+## ADR-0008: Landmark sets cross the WASM boundary as a flat interleaved x,y slice; gestures use scale-invariant distance ratios
+
+**Context:** task 2.3 (`gesture` module, palm-mute + fist-stop) is the first engine module that
+needs a whole hand's 21 MediaPipe landmarks, not just a scalar (smoothing) or a single point
+(strum). Two contract questions had to be settled, and both will be inherited by the next
+landmark consumer (task 3.3 finger-count classification, and later power-strip/hex cursor work):
+(a) how a landmark set is marshalled across the JS↔WASM boundary; (b) how "extended vs. curled"
+is judged robustly without knowing the hand's size, position or rotation in frame.
+
+**Decision:**
+1. **Boundary shape** — a hand is passed as a flat `&[f64]` of **interleaved `x, y` pairs**,
+   length 42 (`[x0,y0, x1,y1, …, x20,y20]`), i.e. a `Float64Array` from JS. Only image-plane
+   `x, y` are used; MediaPipe's `z` is relative/noisier and the palm-vs-fist distinction is
+   already unambiguous in 2D. A flat slice (vs. an array of structs across the boundary) is the
+   cheapest, most portable marshalling and matches the scalar-first spirit of ADR-0006/0007.
+   Wrong length or any non-finite coord is treated as "no hand" → `Neutral`, never a panic.
+2. **Geometry** — a finger's extension is a **straightness ratio**
+   `dist(MCP,TIP) / (dist(MCP,PIP)+dist(PIP,DIP)+dist(DIP,TIP))`: ~1 when straight, →0 when
+   curled back toward the palm. Being a ratio of distances it is invariant to translation, scale
+   and rotation (regression-tested), so it needs no hand-size calibration. Extended at
+   `ratio ≥ 0.80`, curled at `ratio ≤ 0.60`, with the gap a deliberate dead zone so a half-open
+   hand reads `Neutral` instead of flickering. The thumb is excluded (different, noisier
+   geometry; the four fingers alone disambiguate flat-palm from fist). `OpenPalm` = all four
+   extended, `Fist` = all four curled.
+3. **Debounce** — per-frame classification is wrapped in a stateful `GestureCore` that requires a
+   new shape to persist `hold_frames` (default 3) consecutive frames before committing, matching
+   the "stateful detector + `reset()` on tracking loss" pattern of strum/smoothing.
+
+**Consequences:** the frontend flattens each hand's landmarks to a 42-element `Float64Array`
+before calling `GestureDetector.update()` / `classifyHandShape()`, and calls `.reset()` when the
+right hand is lost (wired with the audio work in 2.4). The exact thresholds and `hold_frames` are
+feel-tunable (Phase 6.2 sensitivity sliders, Phase 7.3 manual checklist) — changing their *values*
+does not supersede this ADR; only changing the interleaved-x,y boundary shape or the
+straightness-ratio metric itself would. If a future module needs `z`, add a parallel 63-element
+entry point rather than redefining the 42-element one.
