@@ -219,3 +219,35 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   correct by construction and provably reduce noise without runaway lag in unit tests, but the
   tuning sweet spot is a Phase 6.2 sensitivity-slider + Phase 7.3 manual-checklist item. The filter
   isn't wired into the live render loop yet (no UI task consumes it until the cursor work).
+
+## 2026-11-21 19:40 WIB — task 2.1 six virtual string lines in the right (strum) zone
+
+- did: rendered the six virtual guitar strings across the right zone (PRD §8), following the
+  ADR-0002 pure-logic/thin-DOM split. New `src/strings.ts`:
+  * PURE, unit-tested: `computeStringYs(top, bottom, count=6, marginFraction=0.12)` — evenly
+    spaced, top-to-bottom y positions inset from the band edges, with guards so a degenerate
+    zero-height band, an absurd margin fraction (clamped <0.5 so the inner band can't invert), or
+    a fractional/zero/negative count never produce NaN or <1 line; `stringWidth(index, …)` — a
+    gauge taper from thickest at the top (index 0 = low E, so a downstroke sounds top→bottom per
+    §8) to thinnest at the bottom (high E). Plus `STRING_COUNT=6` and `STRING_NOTE_NAMES`
+    (E A D G B e, standard tuning, 6th→1st top→bottom) for later phases.
+  * thin DOM `drawStrings()` — strokes the six lines with a small horizontal inset and the gauge
+    taper; not unit-tested (needs a real 2D context), exercised by e2e (7.1) / a human.
+  * `src/hud.ts` — extracted `statusBarHeight(height)` (the existing `max(36, round(h*0.07))`
+    formula) and reused it inside `drawStatusBar`, so the strum-zone top stays DRY.
+  * `src/main.ts` — draws the strings in the right half (`width/2 .. width`) below the status bar
+    each frame, behind the hand skeleton and status bar.
+- tested: `npm run test` → 7 files / 53 tests pass (+11 in `src/strings.test.ts`: default six
+  lines, strictly-ascending order, within-band + margin bounds, even/symmetric spacing, single
+  centred line, zero-height band, clamped margin, floored/min count; plus gauge taper direction,
+  endpoints, and single-string width). `npm run typecheck` exit 0; `npm run build` clean (14
+  modules, 137 kB / 43 kB gzip); `npm run test:engine` → cargo 12 passed / 0 failed. No faked
+  passes.
+- next: task 2.2 — Rust/WASM `strum` module: line-crossing detection, direction (up/down), and
+  velocity from a landmark trajectory, with synthetic up/down/slow/fast + near-miss/double-cross
+  `cargo test` cases.
+- needs human verification: the look/placement of the six lines in the right zone (spacing,
+  gauge taper, that they sit below the status bar and read as strings) needs a real browser
+  eyeball — correct by construction (geometry unit-tested, build + typecheck green) but not
+  visually confirmed in this camera-less env. Belongs on the Phase 7.3 manual checklist; the
+  render path gets a deterministic exercise in the Playwright suite (7.1).

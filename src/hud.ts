@@ -52,6 +52,15 @@ const INK_DIM = "rgba(232, 234, 237, 0.5)";
 const ACCENT = "#e8a13a";
 
 /**
+ * Height (CSS px) the status bar occupies for a given viewport height. Exported
+ * so overlays that must sit *below* the bar (zone split, virtual strings) can
+ * share the one definition rather than re-deriving the formula.
+ */
+export function statusBarHeight(height: number): number {
+  return Math.max(36, Math.round(height * 0.07));
+}
+
+/**
  * Draw the two zones as faint tinted halves with an active-zone highlight.
  * `activeRoles` controls which half glows (a hand is currently assigned to it);
  * the dashed divider and the LEFT/RIGHT labels stay in placeholder.drawZoneOverlay
@@ -98,7 +107,7 @@ export function drawStatusBar(
   height: number,
   model: StatusBarModel,
 ): number {
-  const barH = Math.max(36, Math.round(height * 0.07));
+  const barH = statusBarHeight(height);
   const fontSize = Math.round(barH * 0.3);
   const labelSize = Math.round(barH * 0.2);
 

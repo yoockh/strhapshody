@@ -15,9 +15,11 @@ import {
 import {
   drawZoneSplit,
   drawStatusBar,
+  statusBarHeight,
   trackingSummary,
   type StatusBarModel,
 } from "./hud.ts";
+import { drawStrings } from "./strings.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
 /** Adapt a MediaPipe result into the pure `RawHand[]` the assigner consumes. */
@@ -110,6 +112,11 @@ function render(): void {
   // Centre divider, zone labels, and (while starting) a status caption.
   const caption = webcam || cameraError ? undefined : "starting camera…";
   drawZoneOverlay(ctx, width, height, caption);
+
+  // Six virtual strings across the right (strum) zone, below the status bar
+  // (PRD §8 / task 2.1). Strum detection against these lines comes in task 2.2.
+  const barH = statusBarHeight(height);
+  drawStrings(ctx, width / 2, width, barH, height);
 
   // Hand skeleton on top of the tints (mirror baked into the coordinates).
   if (webcam && latestHands && latestHands.landmarks.length > 0) {
