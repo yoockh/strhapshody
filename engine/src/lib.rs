@@ -13,6 +13,9 @@ use wasm_bindgen::prelude::*;
 pub mod smoothing;
 pub use smoothing::OneEuroFilter;
 
+pub mod strum;
+pub use strum::{StrumDetector, StrumDirection, StrumEvent};
+
 /// Trivial number round-trip: proves primitive values marshal across the
 /// JS <-> WASM boundary. Used by the TS round-trip test for task 0.2.
 #[wasm_bindgen]

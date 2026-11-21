@@ -251,3 +251,38 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   eyeball — correct by construction (geometry unit-tested, build + typecheck green) but not
   visually confirmed in this camera-less env. Belongs on the Phase 7.3 manual checklist; the
   render path gets a deterministic exercise in the Playwright suite (7.1).
+
+## 2026-11-21 19:42 WIB — task 2.2 Rust/WASM `strum` module (crossing/direction/velocity)
+
+- did: implemented the strum detector `engine/src/strum.rs` (PRD §8), the first right-hand logic
+  module, following the ADR-0002/0006 pure-core + thin-wasm-wrapper split. Pure `StrumCore` holds
+  all tested logic; `#[wasm_bindgen] StrumDetector` wraps it. `.push(y, timestamp)` is fed one
+  hand-point sample at a time and returns the string crossings for *that step* as a
+  `Vec<StrumEvent>` ({ string_index, direction: StrumDirection{Down,Up}, velocity px/s }) in rake
+  order — top→bottom on a downstroke, bottom→top on an upstroke — so the audio layer (2.4) can
+  trigger voices directly. Crossing uses a **half-open** interval (down: `prev < s <= y`; up:
+  `y <= s < prev`) so resting on / leaving a line never re-fires it and a near-miss fires nothing;
+  velocity = |Δy|/Δt with a nominal-60 Hz fallback so it's always finite and ≥ 0; string positions
+  sorted ascending + NaNs dropped at construction so `string_index` is stable (0 = topmost = low E
+  per strings.ts) regardless of caller order. `.reset()` re-seeds the reference point when tracking
+  is lost / the hand leaves the zone (prevents a phantom whole-fretboard strum on a jump). Recorded
+  the event-stream + crossing-convention + Vec<StrumEvent> boundary choice as ADR-0007. Exported
+  from lib.rs via `pub mod strum` + `pub use`.
+- tested: `cd engine && cargo test` → 28 passed / 0 failed (was 12; +16 strum tests): first-sample
+  no-fire, full down/up sweep in correct rake order, partial stroke, two near-miss cases (approach
+  without crossing, wobble between lines), double-cross in one frame, land-on-line-then-rest no
+  re-fire, down-then-up each direction once, slow-vs-fast velocity (exact 1000 vs 6000 px/s),
+  velocity finite/non-negative + duplicate-timestamp nominal fallback, backwards-timestamp still
+  detects + stays finite, non-finite sample ignored with state preserved, reset swallows the jump,
+  unsorted/NaN string input normalized, no-strings-configured never fires. `npm run build:engine`
+  → wasm compiles clean; `engine/pkg/engine.d.ts` now exports `class StrumDetector` with
+  `push(y, timestamp): StrumEvent[]` + `StrumEvent`/`StrumDirection` (Vec<StrumEvent> return
+  marshals fine on wasm-bindgen 0.2.130). `npm run test` → 7 files / 53 tests still pass (frontend
+  untouched); `npm run typecheck` exit 0; no faked passes.
+- next: task 2.3 — palm-mute (open flat palm) + fist-stop (closed fist) gesture detection from
+  landmark geometry, with synthetic hand-shape landmark unit tests.
+- needs human verification: none for this module — pure deterministic logic, fully cargo-tested.
+  The detector isn't wired into the live render loop yet (task 2.4 consumes its events for audio;
+  the hand-point source + the smoothing/reset wiring land with the audio/cursor work). Real strum
+  *feel* (does a natural hand sweep fire the strings cleanly, missed-strum rate <5% per PRD §10)
+  needs a real camera + hands and belongs on the Phase 7.3 manual checklist.

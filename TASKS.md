@@ -28,7 +28,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 ## Phase 2 — Right hand strumming
 
 - [x] 2.1 Six virtual string lines rendered in the right zone.
-- [ ] 2.2 Rust/WASM `strum` module: line-crossing detection, direction (up/down), velocity from
+- [x] 2.2 Rust/WASM `strum` module: line-crossing detection, direction (up/down), velocity from
       a landmark trajectory; `cargo test` with synthetic up/down/slow/fast trajectories
       covering edge cases (near-miss, double-cross in one frame).
 - [ ] 2.3 Palm-mute (open flat palm over strings) and fist-stop (closed fist) gesture

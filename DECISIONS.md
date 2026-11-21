@@ -139,3 +139,35 @@ instead of lerping from a stale position (the UI integration in a later phase wi
 hand-presence signal). If a future phase needs to smooth many coordinates cheaply in one call, add
 a vector/batch export then rather than reshaping this scalar one — this ADR isn't superseded by
 adding a complementary batch API, only by changing the scalar contract itself.
+
+## ADR-0007: Strum detection is an event stream with a half-open crossing interval
+
+**Context:** task 2.2 is the `strum` engine module. PRD §8 wants each virtual string to fire "at
+the moment the hand crosses its line" (the rake), with up/down direction and a speed that drives
+loudness. Two contract questions had to be settled: (a) what shape the module exposes to the audio
+layer (2.4) and the power-mode restriction (4.3); (b) how to define a "crossing" so a hand that
+comes to rest on a line, or jitters near one, doesn't machine-gun that string.
+
+**Decision:** `StrumDetector` is a **stateful** detector fed one hand-point `(y, timestamp)` sample
+at a time via `.push()`, returning the string crossings for *that step only* as a `Vec<StrumEvent>`
+(`{ string_index, direction: StrumDirection, velocity }`), in rake order (top→bottom for a
+downstroke, bottom→top for an upstroke). The pure core `StrumCore` is wasm-free and holds all the
+tested logic; the `#[wasm_bindgen]` wrapper is thin, matching the ADR-0002 / ADR-0006 split. Returning
+`Vec<StrumEvent>` across the boundary is supported natively by wasm-bindgen 0.2.130 and emits a clean
+`push(y, timestamp): StrumEvent[]` TS signature, so the frontend gets a real array of objects.
+
+A line at `s` is crossed on a step `last_y → y` using a **half-open** interval: moving down,
+`last_y < s <= y`; moving up, `y <= s < last_y`. This fires a line exactly once per actual pass and
+guarantees that resting on a line, or leaving it, never re-fires it (a near-miss or wobble that never
+reaches the line fires nothing). Velocity is `|Δy|/Δt` in **px/second**; a non-advancing timestamp
+falls back to a nominal 60 Hz period so it's always finite and ≥ 0. String y positions are sorted
+ascending and NaNs dropped at construction, so `string_index` is stable (0 = topmost = low E per
+`strings.ts`) regardless of caller order.
+
+**Consequences:** the caller must call `.reset()` when tracking is lost or the hand leaves the strum
+zone, otherwise a large jump back in would register as one giant strum across every line (there is a
+regression test for exactly this). The audio layer (2.4) consumes the returned events directly as
+voice triggers. If a future phase needs sub-frame crossing *timestamps* per string (for even tighter
+rake timing than one velocity-per-step), extend `StrumEvent` with a per-crossing time rather than
+reshaping the push contract — this ADR is superseded only by changing the `(y,ts) → events` shape or
+the crossing-interval convention itself.
