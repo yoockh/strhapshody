@@ -41,7 +41,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 - [x] 3.1 Rust/WASM `hexmap` module: circle-of-fifths hex layout math, point-in-hex test,
       hysteresis at borders; `cargo test` covering center/ring cells and border-flicker cases.
-- [ ] 3.2 Hex flower UI rendered in the left zone, palm-center cursor tracked and highlighting
+- [x] 3.2 Hex flower UI rendered in the left zone, palm-center cursor tracked and highlighting
       the active hex.
 - [ ] 3.3 Finger-count gesture classification (index / index+middle / index+middle+ring) as a
       Rust/WASM function; unit tests with synthetic extended/curled finger landmark configs.

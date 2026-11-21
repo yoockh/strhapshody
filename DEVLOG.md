@@ -404,3 +404,45 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   deliberate move switch cleanly, chord-switch accuracy ≥95% per PRD §10) needs a real camera +
   hands and belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist. The module isn't wired
   into the live render loop yet (task 3.2 consumes it for the cursor + highlight).
+
+## 2026-11-21 20:10 WIB — task 3.2 hex chord-flower UI + palm cursor + active-hex highlight
+
+- did: rendered the 7-cell hex chord flower in the left (chord) zone and wired the left hand's
+  palm cursor into the WASM `hexmap` selector from 3.1 (PRD §6.1). Following the ADR-0002 split:
+  * `src/hexflower.ts` — PURE, unit-tested geometry: `flatTopHexVertices(cx,cy,r)` (the 6 corners
+    of one flat-top hexagon, matching the engine's containment math — top/bottom edges horizontal
+    at ±√3/2·r; degenerate/non-finite r → 6 coincident centre points, never NaN) and
+    `computeHexFlowerLayout(left,top,right,bottom,padding)` (centres the flower in the left-zone
+    rectangle and picks the largest radius whose full `5R × 3√3R` bounding box still fits after a
+    padding margin; padding clamped [0,0.49], degenerate rect → radius floored to 1). Plus the thin
+    DOM `drawHexFlower()` (fills/strokes each cell, labels it with its chord letter, accents the
+    active cell, dots the cursor) — not unit-tested (needs a 2D context), exercised by e2e/human.
+  * `src/engine.ts` — re-export `HexMap` + `OneEuroFilter` (and their instance types) so the
+    frontend reaches the 3.1/1.3 engine classes through the one init wrapper.
+  * `src/main.ts` — new `processChord()`: (re)builds a `HexMap` sized to the left zone on geometry
+    change, maps the chord hand's palm centre (wrist+middle-MCP mean) through the SAME cover-crop+
+    mirror transform the overlay/strum point use, One-Euro-smooths x,y (ADR-0006, one filter each,
+    seconds timestamps), feeds `HexMap.update()` for the hovered cell with hysteresis, draws the
+    flower + cursor, and `.reset()`s the selector + both filters when the chord hand is absent (so a
+    re-entering hand doesn't snap across the flower). The hovered chord letter now drives the status
+    bar's CHORD field (was "—"). Freed the new wasm objects on beforeunload.
+  No new ADR: ADR-0010 (hexmap contract) and ADR-0006 (One Euro contract) already govern this;
+  the cursor smoothing params (min_cutoff 1.5, beta 0.01) and the 0.18·R hysteresis dead-band are
+  feel-tuning those ADRs explicitly leave to Phase 6.2 sliders / the 7.3 manual checklist.
+- tested: `npm run test` → 10 files / 85 tests pass (+12 in `src/hexflower.test.ts`: vertex count,
+  all vertices on the circumradius, leftmost/rightmost on the centre line, flat-top edges at
+  ±√3/2·r, centroid back to centre, degenerate-radius no-NaN; layout centring, bounding-box fit
+  within the padded rect, width-bound vs height-bound zones, degenerate-rect radius floor, absurd-
+  padding clamp). `npm run typecheck` exit 0; `npm run build:engine` → wasm rebuilt (HexMap +
+  OneEuroFilter now in engine.d.ts); `npm run build` clean (19 modules, engine_bg wasm 36.29 kB
+  bundled); `npm run test:engine` → cargo 59 passed / 0 failed (engine untouched). No faked passes.
+- next: task 3.3 — finger-count gesture classification (index / index+middle / index+middle+ring)
+  as a Rust/WASM function with synthetic extended/curled-finger unit tests.
+- needs human verification: the look/placement of the flower in the left zone, whether the smoothed
+  palm cursor feels responsive-but-steady, whether a deliberate move switches cells cleanly while a
+  steady hover holds one (hysteresis + smoothing feel), and that the cursor lands on the right hex
+  on a real mirrored feed — all need a real camera + hands. Correct by construction (pure geometry
+  unit-tested, selector cargo-tested in 3.1, build/typecheck green) but not visually confirmed in
+  this camera-less env. Belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist; the pipeline
+  gets a deterministic exercise via the Playwright suite (7.1). The status bar now shows the live
+  *hovered* chord; the "chord only changes between strums" latch is task 3.4, which sits above this.

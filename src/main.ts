@@ -20,7 +20,20 @@ import {
   type StatusBarModel,
 } from "./hud.ts";
 import { drawStrings, computeStringYs } from "./strings.ts";
-import { initEngine, StrumDetector, type StrumDetectorInstance } from "./engine.ts";
+import {
+  initEngine,
+  StrumDetector,
+  HexMap,
+  OneEuroFilter,
+  type StrumDetectorInstance,
+  type HexMapInstance,
+  type OneEuroFilterInstance,
+} from "./engine.ts";
+import {
+  computeHexFlowerLayout,
+  drawHexFlower,
+  type HexCell,
+} from "./hexflower.ts";
 import { createAudioEngine, type AudioEngine } from "./audio.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
@@ -66,6 +79,23 @@ let engineReady = false;
 let strumDetector: StrumDetectorInstance | null = null;
 // String-line y signature the current detector was built for; rebuilt on resize.
 let strumGeometry = "";
+
+// Chord-flower state (task 3.2). The WASM `hexmap` selector (ADR-0010) decides
+// which of the 7 cells the left hand's palm cursor is in, with border
+// hysteresis; the cursor is One-Euro-smoothed (ADR-0006) so it doesn't jitter
+// between chords. The hex layout is rebuilt when the left-zone geometry changes.
+let hexMap: HexMapInstance | null = null;
+let hexGeometry = "";
+let cursorFilterX: OneEuroFilterInstance | null = null;
+let cursorFilterY: OneEuroFilterInstance | null = null;
+// Hysteresis dead-band as a fraction of the hex radius (feel-tunable, Phase 6.2;
+// clamped to [0,0.49R] inside the engine). One Euro params for the palm cursor:
+// gentle baseline smoothing (min cutoff) that opens up with speed (beta), in the
+// seconds-timestamp convention of ADR-0006.
+const HEX_HYSTERESIS_FRACTION = 0.18;
+const CURSOR_MIN_CUTOFF = 1.5;
+const CURSOR_BETA = 0.01;
+const CURSOR_D_CUTOFF = 1.0;
 
 try {
   audioEngine = createAudioEngine();
@@ -155,6 +185,11 @@ function render(): void {
   const barH = statusBarHeight(height);
   drawStrings(ctx, width / 2, width, barH, height);
 
+  // Chord flower in the left zone (task 3.2): draw the 7-cell hex flower, track
+  // the left hand's smoothed palm cursor, and highlight the hovered cell. The
+  // hovered chord letter feeds the status bar below.
+  const hoveredChord = processChord(ctx, assignments, barH, width, height);
+
   // Strum detection → audio (task 2.4): feed the right hand's palm y to the
   // WASM strum detector and pluck a string voice for every crossing it reports.
   processStrum(assignments, barH, width, height);
@@ -173,8 +208,9 @@ function render(): void {
     );
   }
 
-  // Status bar skeleton (PRD §5). Values are placeholders until later phases.
-  drawStatusBar(ctx, width, height, buildStatusModel(assignments));
+  // Status bar skeleton (PRD §5). Chord now reflects the live hovered hex;
+  // instrument stays a placeholder until Phase 5.
+  drawStatusBar(ctx, width, height, buildStatusModel(assignments, hoveredChord));
 
   // Graceful error path: permission denied, no device, camera in use, etc.
   if (cameraError) {
@@ -240,11 +276,96 @@ function processStrum(
 }
 
 /**
- * Build the status-bar model for this frame. Chord/instrument are placeholders
- * (Phases 3/5); tracking health reflects the real pipeline state so the
- * skeleton is informative rather than static.
+ * Draw the hex chord flower and track the left (chord) hand's cursor (task 3.2).
+ *
+ * Rebuilds the WASM `HexMap` when the left-zone geometry changes (resize), maps
+ * the chord hand's palm centre into canvas pixels through the same cover-crop +
+ * mirror transform as the overlay, One-Euro-smooths it (ADR-0006), and feeds it
+ * to `HexMap.update()` to get the hovered cell with border hysteresis. When no
+ * chord hand is tracked it resets the selector + filters so a hand re-entering
+ * the frame doesn't snap the cursor across the flower. Returns the hovered
+ * chord letter (or null) for the status bar.
  */
-function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
+function processChord(
+  ctx: CanvasRenderingContext2D,
+  assignments: AssignedHand[],
+  barH: number,
+  width: number,
+  height: number,
+): string | null {
+  if (!engineReady) return null;
+
+  // (Re)build the hex flower when the left-zone rectangle changes.
+  const layout = computeHexFlowerLayout(0, barH, width / 2, height);
+  const sig = `${Math.round(layout.cx)},${Math.round(layout.cy)},${Math.round(
+    layout.radius,
+  )}`;
+  if (!hexMap || sig !== hexGeometry) {
+    hexMap?.free();
+    hexMap = new HexMap(
+      layout.cx,
+      layout.cy,
+      layout.radius,
+      layout.radius * HEX_HYSTERESIS_FRACTION,
+    );
+    hexGeometry = sig;
+  }
+  if (!cursorFilterX) {
+    cursorFilterX = new OneEuroFilter(CURSOR_MIN_CUTOFF, CURSOR_BETA, CURSOR_D_CUTOFF);
+  }
+  if (!cursorFilterY) {
+    cursorFilterY = new OneEuroFilter(CURSOR_MIN_CUTOFF, CURSOR_BETA, CURSOR_D_CUTOFF);
+  }
+
+  const chordHand = assignments.find((a) => a.role === "chord");
+  const lm =
+    chordHand && latestHands ? latestHands.landmarks[chordHand.index] : undefined;
+
+  let activeIndex = -1;
+  let cursor: { x: number; y: number } | null = null;
+
+  if (webcam && chordHand && lm && lm[0] && lm[9]) {
+    // Palm centre (wrist + middle-MCP mean), mapped through the same transform
+    // the feed/overlay/strum point use so the cursor lines up with the flower.
+    const palm = { x: (lm[0].x + lm[9].x) / 2, y: (lm[0].y + lm[9].y) / 2 };
+    const { videoWidth, videoHeight } = webcam.video;
+    const raw = landmarkToCanvas(palm, videoWidth, videoHeight, width, height, true);
+    const t = performance.now() / 1000;
+    cursor = {
+      x: cursorFilterX.filter(raw.x, t),
+      y: cursorFilterY.filter(raw.y, t),
+    };
+    activeIndex = hexMap.update(cursor.x, cursor.y);
+  } else {
+    // No tracked chord hand — re-seed selector + smoothing for a clean re-entry.
+    hexMap.reset();
+    cursorFilterX.reset();
+    cursorFilterY.reset();
+  }
+
+  const cellCount = hexMap.cellCount();
+  const cells: HexCell[] = [];
+  for (let i = 0; i < cellCount; i++) {
+    cells.push({
+      x: hexMap.centerX(i),
+      y: hexMap.centerY(i),
+      chord: hexMap.cellChord(i),
+    });
+  }
+  drawHexFlower(ctx, cells, hexMap.radius(), activeIndex, cursor);
+
+  return activeIndex >= 0 ? hexMap.cellChord(activeIndex) : null;
+}
+
+/**
+ * Build the status-bar model for this frame. Chord reflects the live hovered hex
+ * (task 3.2), instrument is a placeholder (Phase 5); tracking health reflects the
+ * real pipeline state so the skeleton is informative rather than static.
+ */
+function buildStatusModel(
+  assignments: AssignedHand[],
+  hoveredChord: string | null,
+): StatusBarModel {
   let tracking: string;
   if (cameraError) tracking = "camera off";
   else if (!webcam) tracking = "starting camera…";
@@ -252,7 +373,7 @@ function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
   else tracking = trackingSummary(assignments).label;
 
   return {
-    chord: "—",
+    chord: hoveredChord ?? "—",
     mode: "Chord",
     instrument: "Acoustic",
     tracking,
@@ -267,4 +388,7 @@ window.addEventListener("beforeunload", () => {
   handTracker?.close();
   audioEngine?.close();
   strumDetector?.free();
+  hexMap?.free();
+  cursorFilterX?.free();
+  cursorFilterY?.free();
 });
