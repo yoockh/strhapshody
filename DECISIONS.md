@@ -207,3 +207,54 @@ feel-tunable (Phase 6.2 sensitivity sliders, Phase 7.3 manual checklist) — cha
 does not supersede this ADR; only changing the interleaved-x,y boundary shape or the
 straightness-ratio metric itself would. If a future module needs `z`, add a parallel 63-element
 entry point rather than redefining the 42-element one.
+
+## ADR-0009: Web Audio skeleton — pure note math in TS, thin voice wrapper; test chord = open strings; first frontend→WASM init
+
+**Context:** task 2.4 is the first task that (a) makes sound and (b) actually wires the browser
+frontend into the WASM engine (the `strum` detector from 2.2). Several contract questions had to
+be settled: where the audio logic splits between testable-pure and DOM-bound; what the "single
+hardcoded test chord" is; how strum velocity maps to loudness; how the right hand's position feeds
+the strum detector; and how the `wasm-pack --target web` engine is initialized in the browser.
+
+**Decisions:**
+1. **Where the ADR-0002 split falls for audio.** Note→frequency math (`notes.ts`:
+   scientific-pitch-notation parsing, equal-temperament `midiToFrequency`, the test-chord
+   frequency table) and the strum-velocity→voice-gain mapping (`velocityToGain` in `audio.ts`) are
+   pure and unit-tested. Everything that needs a live `AudioContext` — oscillators, envelopes,
+   per-string voice allocation, resume-on-gesture — is a thin wrapper (`createAudioEngine`) not
+   unit-tested here (no audio hardware in this env), exercised by the Playwright e2e suite (7.1)
+   and a human. `audio.ts` touches no Web-Audio symbol at module load, so importing it under node
+   to test `velocityToGain` is safe.
+2. **Test chord = the six open strings** (E2 A2 D3 G3 B3 E4), matching `STRING_NOTE_NAMES` top→
+   bottom. Strummed together they ring as a real open-position voicing, so the skeleton sounds
+   musical, not like a test tone, without pre-empting the Phase-3 chord tables (which will call
+   `setChord()` to replace the note set).
+3. **Pluck = placeholder triangle oscillator** through a per-voice gain with a fast attack and a
+   ~1.4 s exponential decay, summed on a master bus. Six voice *slots* (one per string); re-plucking
+   a string fast-fades and replaces its previous voice, like a real string that can only ring one
+   note at a time. `stopAll()` exists for the fist-stop gesture (2.3) to use later. The timbre is
+   explicitly throwaway — Phase 5 replaces it with Karplus-Strong (5.1) and the waveshaper electric
+   voice (5.2). `velocityToGain` maps |Δy|/Δt (px/s) linearly to `[0.08, 1.0]` up to a 3000 px/s
+   reference, then saturates, so even a gentle strum is audible and a hard one doesn't clip harder.
+4. **Strum-point source.** The detector is fed the strum hand's palm centre (mean of wrist +
+   middle-MCP, the same steady point `handedness.representativeX` uses), mapped to canvas y through
+   the exact `landmarkToCanvas` cover-crop+mirror transform the overlay uses, so crossings align
+   with the drawn string lines. The detector is rebuilt when the string-line y positions change
+   (resize) and `.reset()` every frame the strum hand is absent, so a hand re-entering frame can't
+   register as one whole-zone strum (the ADR-0007 hazard). Timestamps are `performance.now()/1000`
+   (seconds), matching the smoothing/strum seconds convention.
+5. **Engine init (first frontend→WASM integration).** The `wasm-pack --target web` module's default
+   export is an async initializer that must run once before any export is constructed (ADR-0004).
+   `engine.ts` wraps it in an idempotent `initEngine()` promise and re-exports `StrumDetector` /
+   `StrumEvent` / `StrumDirection`, so callers don't re-implement the init dance. Vite bundles
+   `engine_bg.wasm` as an asset automatically (confirmed: `npm run build` emits
+   `dist/assets/engine_bg-*.wasm`). This supersedes nothing in ADR-0004 — it's the "future frontend
+   code initializes the engine once at startup" that ADR-0004 anticipated, now realized.
+
+**Consequences:** the AudioContext starts suspended (browser autoplay policy) and is resumed on the
+first pointer/key event via a one-shot listener; nothing sounds before a user gesture, which is
+correct and also means audio can't be confirmed in this headless env. `StrumEvent` objects returned
+across the boundary are `.free()`d after their fields are read, to avoid leaking wasm memory in the
+per-frame hot path. Changing the pluck timbre, envelope times, `velocityToGain` constants, or the
+test-chord notes does not supersede this ADR; only changing the pure/DOM split, the engine-init
+contract, or the strum-point mapping would.

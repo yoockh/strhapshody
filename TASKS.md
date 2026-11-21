@@ -33,7 +33,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       covering edge cases (near-miss, double-cross in one frame).
 - [x] 2.3 Palm-mute (open flat palm over strings) and fist-stop (closed fist) gesture
       detection from landmark geometry; unit tests with synthetic hand-shape landmark sets.
-- [ ] 2.4 Web Audio engine skeleton: 6 string voices, a single hardcoded test chord, pluck
+- [x] 2.4 Web Audio engine skeleton: 6 string voices, a single hardcoded test chord, pluck
       synthesis wired to strum events from 2.2 (placeholder timbre is fine here, real
       instruments come in Phase 5).
 

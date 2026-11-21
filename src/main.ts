@@ -4,7 +4,7 @@ import { drawFeedPattern, drawZoneOverlay, drawErrorBanner } from "./placeholder
 import { startWebcam, describeCameraError, type WebcamHandle } from "./webcam.ts";
 import { drawVideoCover } from "./videoframe.ts";
 import { createHandTracker, type HandTracker } from "./handtracking.ts";
-import { drawHandLandmarks } from "./handoverlay.ts";
+import { drawHandLandmarks, landmarkToCanvas } from "./handoverlay.ts";
 import {
   assignHands,
   type AssignedHand,
@@ -19,7 +19,9 @@ import {
   trackingSummary,
   type StatusBarModel,
 } from "./hud.ts";
-import { drawStrings } from "./strings.ts";
+import { drawStrings, computeStringYs } from "./strings.ts";
+import { initEngine, StrumDetector, type StrumDetectorInstance } from "./engine.ts";
+import { createAudioEngine, type AudioEngine } from "./audio.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
 /** Adapt a MediaPipe result into the pure `RawHand[]` the assigner consumes. */
@@ -54,6 +56,41 @@ let cameraError: string | null = null;
 // is live; detection failures must never break the render loop.
 let handTracker: HandTracker | null = null;
 let latestHands: HandLandmarkerResult | null = null;
+
+// Audio + strum state (task 2.4). The WASM `strum` detector turns the right
+// hand's trajectory into string-crossing events; the Web Audio engine plays a
+// plucked voice per crossing. The AudioContext starts suspended and is resumed
+// on the first user gesture (browser autoplay policy).
+let audioEngine: AudioEngine | null = null;
+let engineReady = false;
+let strumDetector: StrumDetectorInstance | null = null;
+// String-line y signature the current detector was built for; rebuilt on resize.
+let strumGeometry = "";
+
+try {
+  audioEngine = createAudioEngine();
+} catch (err) {
+  console.warn("[strhapshody] audio unavailable:", err);
+}
+
+// Resume audio on the first user interaction (pointer or key), once.
+function resumeAudioOnce(): void {
+  audioEngine?.resume().catch(() => {});
+  window.removeEventListener("pointerdown", resumeAudioOnce);
+  window.removeEventListener("keydown", resumeAudioOnce);
+}
+window.addEventListener("pointerdown", resumeAudioOnce);
+window.addEventListener("keydown", resumeAudioOnce);
+
+// Initialize the WASM engine in the background; the strum detector is created
+// lazily once it's ready and the strum-zone geometry is known.
+initEngine()
+  .then(() => {
+    engineReady = true;
+  })
+  .catch((err: unknown) => {
+    console.warn("[strhapshody] engine init failed:", err);
+  });
 
 startWebcam()
   .then((handle) => {
@@ -118,6 +155,10 @@ function render(): void {
   const barH = statusBarHeight(height);
   drawStrings(ctx, width / 2, width, barH, height);
 
+  // Strum detection → audio (task 2.4): feed the right hand's palm y to the
+  // WASM strum detector and pluck a string voice for every crossing it reports.
+  processStrum(assignments, barH, width, height);
+
   // Hand skeleton on top of the tints (mirror baked into the coordinates).
   if (webcam && latestHands && latestHands.landmarks.length > 0) {
     const { videoWidth, videoHeight } = webcam.video;
@@ -141,6 +182,61 @@ function render(): void {
   }
 
   requestAnimationFrame(render);
+}
+
+/**
+ * Drive the strum detector from the right hand and trigger audio (task 2.4).
+ *
+ * Rebuilds the detector when the strum-zone geometry changes (resize), feeds it
+ * the strum hand's palm-centre y mapped into canvas pixels (the same mapping the
+ * overlay uses, so it lines up with the drawn strings), and plucks a voice for
+ * each crossing. When there's no tracked strum hand it resets the detector so a
+ * hand re-entering the frame doesn't register as one giant whole-zone strum
+ * (ADR-0007).
+ */
+function processStrum(
+  assignments: AssignedHand[],
+  barH: number,
+  width: number,
+  height: number,
+): void {
+  if (!engineReady) return;
+
+  // (Re)build the detector when the six string-line y positions change.
+  const stringYs = computeStringYs(barH, height);
+  const sig = stringYs.map((y) => Math.round(y)).join(",");
+  if (!strumDetector || sig !== strumGeometry) {
+    strumDetector?.free();
+    strumDetector = new StrumDetector(new Float64Array(stringYs));
+    strumGeometry = sig;
+  }
+
+  const strumHand = assignments.find((a) => a.role === "strum");
+  const lm =
+    strumHand && latestHands ? latestHands.landmarks[strumHand.index] : undefined;
+
+  if (!webcam || !strumHand || !lm || !lm[0] || !lm[9]) {
+    // No tracked strum hand this frame — re-seed so the next push doesn't jump.
+    strumDetector.reset();
+    return;
+  }
+
+  // Palm centre (wrist + middle-MCP mean), mapped through the same cover-crop +
+  // mirror transform as the feed/overlay so the y lines up with the strings.
+  const palm = {
+    x: (lm[0].x + lm[9].x) / 2,
+    y: (lm[0].y + lm[9].y) / 2,
+  };
+  const { videoWidth, videoHeight } = webcam.video;
+  const point = landmarkToCanvas(palm, videoWidth, videoHeight, width, height, true);
+
+  const events = strumDetector.push(point.y, performance.now() / 1000);
+  for (const ev of events) {
+    const index = ev.string_index;
+    const velocity = ev.velocity;
+    ev.free();
+    audioEngine?.pluck(index, velocity);
+  }
 }
 
 /**
@@ -169,4 +265,6 @@ requestAnimationFrame(render);
 window.addEventListener("beforeunload", () => {
   webcam?.stop();
   handTracker?.close();
+  audioEngine?.close();
+  strumDetector?.free();
 });

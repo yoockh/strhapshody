@@ -320,3 +320,47 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   MediaPipe landmarks, the right thresholds/hold_frames, and whether excluding the thumb is correct
   in practice — needs a real camera + hands; belongs on the Phase 6.2 tuning + Phase 7.3 manual
   checklist. The detector isn't in the live render loop yet (2.4 consumes it for audio).
+
+## 2026-11-21 20:05 WIB — task 2.4 Web Audio engine skeleton (6 voices, test chord, strum→pluck)
+
+- did: built the Web Audio skeleton (PRD §9) and, for the first time, wired the browser frontend
+  into the WASM engine (the `strum` detector from 2.2). Following the ADR-0002 pure/DOM split,
+  recorded as ADR-0009:
+  * `src/notes.ts` — PURE, unit-tested: scientific-pitch-notation parsing (`noteToMidi`/
+    `noteToFrequency`, sharps/flats + `s` alias, case-insensitive, negative octaves, rejects
+    garbage) and equal-temperament `midiToFrequency` (A4=440). `TEST_CHORD_NOTES` = the six open
+    strings E2 A2 D3 G3 B3 E4 (matches `STRING_NOTE_NAMES` top→bottom) + resolved
+    `TEST_CHORD_FREQUENCIES`.
+  * `src/audio.ts` — PURE `velocityToGain` (strum px/s → voice gain in [0.08,1.0], linear to a
+    3000 px/s ref then saturating, non-finite/≤0 → floor, never NaN; unit-tested) + the thin
+    `createAudioEngine` Web Audio wrapper (NOT unit-tested — needs a live AudioContext): 6 voice
+    slots, triangle-osc placeholder pluck with fast attack + ~1.4 s exp decay on a master bus,
+    `resume()`/`setChord()`/`pluck()`/`stopAll()`/`close()`. Defaults to the test chord. No
+    Web-Audio symbol touched at import time, so node can import it for the pure test.
+  * `src/engine.ts` — idempotent `initEngine()` wrapping the `wasm-pack --target web` default
+    async initializer (ADR-0004's anticipated frontend init), re-exporting `StrumDetector`/
+    `StrumEvent`/`StrumDirection`.
+  * `src/main.ts` — inits the engine + audio in the background; resumes audio on the first
+    pointer/key gesture (autoplay policy); `processStrum()` (re)builds a `StrumDetector` on
+    strum-zone geometry change, feeds it the strum hand's palm-centre y via the same
+    `landmarkToCanvas` transform as the overlay (so crossings line up with the drawn strings),
+    plucks a voice per `StrumEvent` (then `.free()`s each event), and `.reset()`s the detector
+    whenever the strum hand is absent (avoids the ADR-0007 whole-zone-strum-on-reentry hazard).
+    Cleans up audio + detector on beforeunload.
+- tested: `npm run typecheck` exit 0; `npm run test` → 9 files / 73 tests pass (+20: 14 in
+  `notes.test.ts` covering MIDI/frequency math, SPN parsing incl. sharps/flats/`s`-alias/case/
+  negative-octave/whitespace, every reject case, and the open-string test chord; 6 in
+  `audio.test.ts` covering `velocityToGain` floor/saturation/linearity/monotonicity/bounds/custom
+  opts); `npm run build` → clean, and crucially Vite now bundles the engine wasm
+  (`dist/assets/engine_bg-*.wasm`, 31.55 kB) — the frontend→WASM pipeline works at build time;
+  `npm run test:engine` → cargo 43 passed / 0 failed (engine untouched). No faked passes.
+- next: task 3.1 — Rust/WASM `hexmap` module: circle-of-fifths hex layout math, point-in-hex test,
+  hysteresis at borders, with `cargo test` over center/ring/border-flicker cases.
+- needs human verification: the actual *sound* can't be produced in this headless, audio-less env
+  — whether a strum fires audible plucks at the right pitches, the placeholder timbre, the
+  velocity→loudness feel, and that the palm-y→string-crossing mapping lines up on a real camera all
+  need Yaya's machine + hands + speakers. The strum→pluck pipeline is correct by construction (pure
+  parts unit-tested, engine cargo-tested, build green) and gets a deterministic end-to-end exercise
+  via the Playwright keyboard-fallback + Web-Audio-assertion suite in task 7.1. Belongs on the
+  Phase 7.3 manual checklist. Also: this is the first real browser load of the engine wasm — the
+  `initEngine()` fetch needs a real online browser to confirm (ADR-0004/0005 CDN+asset caveat).
