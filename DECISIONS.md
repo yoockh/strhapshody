@@ -258,3 +258,47 @@ across the boundary are `.free()`d after their fields are read, to avoid leaking
 per-frame hot path. Changing the pluck timbre, envelope times, `velocityToGain` constants, or the
 test-chord notes does not supersede this ADR; only changing the pure/DOM split, the engine-init
 contract, or the strum-point mapping would.
+
+## ADR-0010: Hex map is flat-top hexagons, nearest-centre Voronoi containment, inflate/deflate hysteresis
+
+**Context:** task 3.1 is the `hexmap` engine module (PRD §6.1): a 7-cell "flower" (centre C; ring
+clockwise from top G, D, A, E, B, F, the circle of fifths), a point-in-hex test for the palm-centre
+cursor, and border hysteresis so a cursor on a seam doesn't flicker between two chords. Three
+contract questions had to be settled, and task 3.2 (hex UI), 3.3/3.4 (gesture + chord-change rule)
+inherit them: (a) hex orientation; (b) how containment is decided; (c) how hysteresis is shaped.
+
+**Decision:**
+1. **Flat-top hexagons.** A flat-top hex (flat edge on top) is the only orientation with a neighbour
+   *directly above* the centre, which is what "G at the top of the ring" requires. Ring cells sit at
+   centre-to-centre distance `√3·R` (two apothems) from the centre, at 60° intervals clockwise from
+   straight up; in screen coords (y down) the offsets are the table in `hexmap.rs`. Cell index order
+   is fixed `[C, G, D, A, E, B, F]` with `CELL_CHORDS` exposed so the UI/audio layers share one
+   mapping rather than re-deriving letters.
+2. **Nearest-centre + exact containment.** A regular hex tiling is the Voronoi diagram of its
+   centres, so the cell a point falls in is the one with the nearest centre — confirmed by an exact
+   flat-top-hexagon inequality (`|dy| ≤ √3/2·r` and `√3·|dx|+|dy| ≤ √3·r`). The confirm step is what
+   makes a point just *outside* the flower (whose outer edges have no neighbour) read as "no cell"
+   rather than snapping to the nearest outer hex. `raw_cell` is the stateless version; `update` adds
+   hysteresis.
+3. **Inflate/deflate hysteresis.** The selector is stateful (like strum/gesture/smoothing): it holds
+   the current cell while the cursor stays inside that cell *inflated* to `R+margin`, and only adopts
+   a different cell once the cursor is *deep* inside it (inside it *deflated* to `R−margin`) or has
+   left the inflated current cell entirely. This is a dead band of total width `√3·margin` around
+   every seam — the PRD's "must move a little past the border to switch". `margin` is clamped to
+   `[0, 0.49·R]`; radius floored positive; non-finite config sanitised; a non-finite cursor sample
+   *keeps* the held cell (one garbage frame must not drop the chord).
+
+Boundary shape: the `#[wasm_bindgen] HexMap` wrapper returns cell indices as `i32` with `-1` ==
+"no cell" (no Option shim needed in TS), plus `centerX/centerY/radius/cellCount/cellChord` getters
+for the task-3.2 renderer. The pure `HexCore` holds all tested logic, matching the ADR-0002 split.
+Cursor coords are canvas pixels (the frontend will map the smoothed palm centre through the same
+cover-crop+mirror transform the overlay/strum point use).
+
+**Consequences:** the frontend creates one `HexMap` sized to the left zone, rebuilds it on
+resize/hex-size change, feeds it the smoothed palm centre each frame, and calls `.reset()` when the
+left hand is lost. The "chord only changes between strums" rule (task 3.4) sits *above* this module —
+`update()` tracks the live hover; 3.4 latches the sounding chord to a strum boundary. Changing the
+`margin` default or hex size is feel-tuning (Phase 6.2 sliders), not an ADR change; only changing the
+orientation, the containment metric, or the hysteresis scheme would supersede this. Alternate hex
+layouts (PRD §6.1 "can be changed in settings", ADR-0003 §2) would re-order `CELL_CHORDS` / the
+offset table, not reshape the API.

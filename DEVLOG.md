@@ -364,3 +364,43 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   via the Playwright keyboard-fallback + Web-Audio-assertion suite in task 7.1. Belongs on the
   Phase 7.3 manual checklist. Also: this is the first real browser load of the engine wasm — the
   `initEngine()` fetch needs a real online browser to confirm (ADR-0004/0005 CDN+asset caveat).
+
+## 2026-11-21 20:00 WIB — task 3.1 Rust/WASM `hexmap` module (layout + point-in-hex + hysteresis)
+
+- did: implemented the chord-map geometry engine module `engine/src/hexmap.rs` (PRD §6.1), the
+  first left-hand logic module, following the ADR-0002 pure-core + thin-wasm-wrapper pattern.
+  Pure `HexCore` holds all tested logic; `#[wasm_bindgen] HexMap` wraps it. The 7-cell flower is
+  **flat-top** hexagons (only orientation with a neighbour directly above, so G can sit at the top
+  of the ring); cell index order fixed `[C, G, D, A, E, B, F]` — centre C, ring clockwise from top
+  along the circle of fifths — with `CELL_CHORDS` exposed. Ring centres computed at √3·R from the
+  flower centre at 60° steps clockwise from up (screen coords, y-down). `raw_cell(px,py)` is the
+  stateless point-in-hex test: nearest centre (the hex tiling is the Voronoi of its centres) +
+  exact flat-top containment (`|dy|≤√3/2·r` and `√3·|dx|+|dy|≤√3·r`) so a point just outside the
+  flower reads as "no cell" instead of snapping to an outer hex. `update(px,py)` adds **border
+  hysteresis**: holds the current cell while the cursor stays inside it inflated to `R+margin`, only
+  adopts another cell once deep inside it (deflated to `R−margin`) or after leaving the inflated
+  current cell — a √3·margin dead band so a cursor on a seam never flickers chords. Guards: radius
+  floored positive, margin clamped `[0,0.49·R]`, non-finite config sanitised, a non-finite cursor
+  sample keeps the held cell (one garbage frame can't drop the chord). `reset()` for tracking loss.
+  `#[wasm_bindgen]` boundary: cell index as `i32` (`-1`=none, no Option shim) + `centerX/centerY/
+  radius/cellCount/cellChord` getters for the 3.2 renderer. Recorded orientation + containment +
+  hysteresis contract as ADR-0010. Exported from lib.rs via `pub mod hexmap` + `pub use HexMap`.
+- tested: `cd engine && cargo test` → 59 passed / 0 failed (was 43; +16 hexmap tests): centres
+  match the circle-of-fifths layout + all ring cells equidistant at √3·R, chord labels match spec,
+  raw_cell hits every one of the 7 centres, centre-hex interior points, outside-flower → None (far
+  above / to the side / just past an outer slanted edge), non-finite point → None, hysteresis holds
+  then switches C→G and G→C at the computed inflate/deflate thresholds, **no-flicker oscillation on
+  a border** (10 cycles straddling the seam stay on C), leaving the flower drops selection, reset
+  clears, non-finite update keeps the held cell, adjacent ring-cell switch needs depth, degenerate
+  radius guarded, absurd margin clamped, and the to_i32 none→-1 mapping. `npm run build:engine` →
+  wasm compiles clean; `engine/pkg/engine.d.ts` now exports `class HexMap`. `npm run typecheck`
+  exit 0; `npm run test` → 9 files / 73 tests still pass (frontend untouched); `npm run build`
+  clean. No faked passes.
+- next: task 3.2 — render the hex flower UI in the left zone, track the palm-centre cursor (via the
+  cover-crop+mirror transform + One Euro smoothing from 1.3), and highlight the active hex using
+  `HexMap.update()`.
+- needs human verification: none for the pure logic (fully cargo-tested, deterministic). The *feel*
+  of the default hysteresis `margin` and hex `radius` (does a steady hover hold one chord, does a
+  deliberate move switch cleanly, chord-switch accuracy ≥95% per PRD §10) needs a real camera +
+  hands and belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist. The module isn't wired
+  into the live render loop yet (task 3.2 consumes it for the cursor + highlight).
