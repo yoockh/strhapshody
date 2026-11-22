@@ -19,6 +19,9 @@ pub use strum::{StrumDetector, StrumDirection, StrumEvent};
 pub mod gesture;
 pub use gesture::{classify_hand_shape, GestureDetector, HandShape};
 
+pub mod fingercount;
+pub use fingercount::{classify_chord_quality, ChordQuality, FingerCountDetector};
+
 pub mod hexmap;
 pub use hexmap::HexMap;
 

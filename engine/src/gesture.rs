@@ -71,7 +71,7 @@ pub enum HandShape {
 }
 
 /// Number of interleaved coordinates expected: 21 landmarks * 2 (x, y).
-const LANDMARK_COORDS: usize = 42;
+pub(crate) const LANDMARK_COORDS: usize = 42;
 
 /// A finger at or above this straightness ratio is considered **extended**.
 pub const EXTENDED_MIN: f64 = 0.80;
@@ -84,11 +84,13 @@ pub const CURLED_MAX: f64 = 0.60;
 pub const DEFAULT_HOLD_FRAMES: u32 = 3;
 
 // MediaPipe hand-landmark indices (https://developers.google.com/mediapipe).
-// Each finger is (MCP, PIP, DIP, TIP).
-const INDEX_FINGER: [usize; 4] = [5, 6, 7, 8];
-const MIDDLE_FINGER: [usize; 4] = [9, 10, 11, 12];
-const RING_FINGER: [usize; 4] = [13, 14, 15, 16];
-const PINKY_FINGER: [usize; 4] = [17, 18, 19, 20];
+// Each finger is (MCP, PIP, DIP, TIP). Shared with the `fingercount` module
+// (task 3.3) which classifies the left hand's extended-finger count with the
+// same landmark boundary + straightness metric (ADR-0008).
+pub(crate) const INDEX_FINGER: [usize; 4] = [5, 6, 7, 8];
+pub(crate) const MIDDLE_FINGER: [usize; 4] = [9, 10, 11, 12];
+pub(crate) const RING_FINGER: [usize; 4] = [13, 14, 15, 16];
+pub(crate) const PINKY_FINGER: [usize; 4] = [17, 18, 19, 20];
 
 /// Read landmark `i` as an `(x, y)` point from the interleaved slice.
 #[inline]
@@ -119,8 +121,8 @@ fn finger_straightness(landmarks: &[f64], finger: [usize; 4]) -> Option<f64> {
 }
 
 /// Per-finger verdict: `Some(true)` extended, `Some(false)` curled, `None`
-/// ambiguous (between the thresholds, or degenerate).
-fn finger_extended(landmarks: &[f64], finger: [usize; 4]) -> Option<bool> {
+/// ambiguous (between the thresholds, or degenerate). Shared with `fingercount`.
+pub(crate) fn finger_extended(landmarks: &[f64], finger: [usize; 4]) -> Option<bool> {
     match finger_straightness(landmarks, finger) {
         Some(r) if r >= EXTENDED_MIN => Some(true),
         Some(r) if r <= CURLED_MAX => Some(false),
@@ -129,7 +131,7 @@ fn finger_extended(landmarks: &[f64], finger: [usize; 4]) -> Option<bool> {
 }
 
 /// True iff the slice is the expected length and every coordinate is finite.
-fn landmarks_valid(landmarks: &[f64]) -> bool {
+pub(crate) fn landmarks_valid(landmarks: &[f64]) -> bool {
     landmarks.len() == LANDMARK_COORDS && landmarks.iter().all(|v| v.is_finite())
 }
 

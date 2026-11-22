@@ -302,3 +302,42 @@ left hand is lost. The "chord only changes between strums" rule (task 3.4) sits 
 orientation, the containment metric, or the hysteresis scheme would supersede this. Alternate hex
 layouts (PRD §6.1 "can be changed in settings", ADR-0003 §2) would re-order `CELL_CHORDS` / the
 offset table, not reshape the API.
+
+## ADR-0011: Finger-count quality is a clean-pattern classifier that holds the last quality on an ambiguous/lost hand
+
+**Context:** task 3.3 is the `fingercount` engine module (PRD §6.2): the left hand hovers a hex to
+pick the chord *root* while the number of extended fingers sets the chord *quality* (index = major,
+index+middle = minor, index+middle+ring = dominant-7th, the latter a stretch goal). It reuses the
+exact landmark boundary + straightness metric of the `gesture` module (ADR-0008), so the only new
+contract questions are: (a) what finger patterns count as a clean, committed gesture; (b) what a
+detector reports before any clear gesture; (c) how an ambiguous or lost-hand frame is treated.
+
+**Decision:**
+1. **Clean-pattern classification.** A quality is only recognised for a *contiguous run* of
+   clearly-extended fingers starting at the index — index / index+middle / index+middle+ring — with
+   **every** finger past the run, **including the pinky**, clearly curled. Any finger in the
+   straightness dead zone (ambiguous), the index not extended, a gap (e.g. index+ring, no middle),
+   or a raised pinky yields `ChordQuality::Unknown` ("no clear finger-count this frame"). Requiring a
+   clean pattern means a half-formed hand never silently flips the sounding quality. The thumb is
+   excluded (same noisy-geometry rationale as ADR-0008).
+2. **Default = `Major`.** A freshly-created / just-reset detector reports `ChordQuality::Major`
+   before any clear gesture — the natural default quality when a hex is first hovered.
+3. **`Unknown` *holds*, it does not decay (differs from `gesture.rs`).** Chord quality is a
+   *selection* (like the hovered hex cell of ADR-0010), not a momentary modifier like palm-mute. So
+   an `Unknown` frame — an ambiguous hand, or a lost hand producing an invalid slice — holds the last
+   committed quality; only a *different* clear quality sustained `hold_frames` (default 3) consecutive
+   frames replaces it. This mirrors ADR-0010's "non-finite sample keeps the held cell; reset on
+   tracking loss" rather than the gesture detector's decay-to-`Neutral`. `reset()` returns to `Major`
+   when the chord hand is lost.
+
+Boundary shape (ADR-0008): a hand is a flat 42-value `Float64Array`; the `#[wasm_bindgen]`
+`FingerCountDetector` wraps the pure `FingerCountCore` (all tested logic), plus a stateless
+`classifyChordQuality()` export and the `ChordQuality` enum. Shared per-finger primitives
+(`finger_extended`, `landmarks_valid`, the finger index tables) are reused from `gesture.rs` (made
+`pub(crate)`) rather than duplicated.
+
+**Consequences:** task 3.4 (chord-change-only-between-strums) latches this committed quality together
+with the hovered hex root to a strum boundary; task 3.5 maps (root, quality) to a fret/note set.
+Changing the `hold_frames` default or the `EXTENDED_MIN`/`CURLED_MAX` thresholds (shared with
+`gesture`) is feel-tuning (Phase 6.2 sliders / 7.3 checklist), not an ADR change; only changing the
+clean-pattern rule, the default quality, or the hold-on-`Unknown` behaviour would supersede this.

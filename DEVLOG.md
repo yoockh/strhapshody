@@ -446,3 +446,39 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   this camera-less env. Belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist; the pipeline
   gets a deterministic exercise via the Playwright suite (7.1). The status bar now shows the live
   *hovered* chord; the "chord only changes between strums" latch is task 3.4, which sits above this.
+
+## 2026-11-22 12:53 WIB — task 3.3 finger-count chord-quality classification (Rust/WASM `fingercount`)
+
+- did: implemented the left-hand chord-*quality* classifier `engine/src/fingercount.rs` (PRD §6.2),
+  the second left-hand logic module (root comes from `hexmap`, quality from this). Reuses the exact
+  ADR-0008 landmark boundary (flat 42-value `Float64Array`) and straightness metric as `gesture.rs`
+  — made `gesture.rs`'s per-finger primitives (`finger_extended`, `landmarks_valid`, the finger
+  index tables, `LANDMARK_COORDS`) `pub(crate)` and imported them rather than duplicating. Pure
+  `FingerCountCore` holds the debounce state; `#[wasm_bindgen] FingerCountDetector` wraps it, plus a
+  stateless `classifyChordQuality()` export + `ChordQuality` enum {Unknown, Major, Minor, Dominant7}.
+  `classify_finger_count` only commits a quality for a *clean contiguous run* from the index — index
+  = Major, index+middle = Minor, index+middle+ring = Dominant7 (stretch goal) — with every finger
+  past the run, incl. the pinky, clearly curled; ambiguous/gap/raised-pinky/index-curled → Unknown.
+  Default quality = Major; crucially an Unknown frame **holds** the last committed quality (quality
+  is a *selection* like the hovered hex cell, not a momentary modifier like palm-mute), differing
+  from the gesture detector's decay-to-Neutral — a different clear quality must persist `hold_frames`
+  (default 3) frames to replace it; `reset()` → Major on tracking loss. Registered the module in
+  `lib.rs` (`pub mod fingercount` + `pub use`). Recorded the clean-pattern / default-Major /
+  hold-on-Unknown contract as ADR-0011.
+- tested: `cd engine && cargo test` → 76 passed / 0 failed (was 59; +17 fingercount tests): the three
+  qualities classify, fist/open-palm/raised-pinky/gap/middle-only → Unknown, wrong-length +
+  non-finite input → Unknown, rotate+scale+translate invariance on a minor gesture, detector starts
+  Major, debounce needs hold_frames to commit + rejects a single noisy frame, Unknown frame (empty
+  slice *and* a fist) holds the last quality, switches after a sustained change, hold_frames=0→1
+  immediate, reset→Major. `npm run build:engine` → wasm compiles clean; `engine.d.ts` now exports
+  `class FingerCountDetector`, `enum ChordQuality`, `function classifyChordQuality(...)`. `npm run
+  test` → 10 files / 85 tests still pass (frontend untouched — module not wired to the render loop
+  yet); `npm run typecheck` exit 0; `npm run build` clean (engine_bg wasm bundled). No faked passes.
+- next: task 3.4 — chord-change-only-between-strums rule: wire the hovered hex cell (3.2) + this
+  committed finger-count quality through the strum engine so the *sounding* chord only updates on a
+  strum boundary, never mid-ring.
+- needs human verification: none for the pure logic (fully cargo-tested, deterministic). Whether a
+  natural index / index+middle / index+middle+ring reliably reads as the intended quality on live
+  MediaPipe landmarks, whether requiring the pinky curled is comfortable, and the right
+  thresholds/hold_frames — all need a real camera + hands; belongs on the Phase 6.2 tuning + Phase
+  7.3 manual checklist. The classifier isn't in the live render loop yet (3.4/3.5 consume it).
