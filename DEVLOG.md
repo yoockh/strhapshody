@@ -482,3 +482,43 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   MediaPipe landmarks, whether requiring the pinky curled is comfortable, and the right
   thresholds/hold_frames — all need a real camera + hands; belongs on the Phase 6.2 tuning + Phase
   7.3 manual checklist. The classifier isn't in the live render loop yet (3.4/3.5 consume it).
+
+## 2026-11-22 13:05 WIB — task 3.4 chord-change-only-between-strums latch (Rust/WASM `chordlatch`)
+
+- did: implemented the "sounding chord only changes on a strum boundary, never mid-ring" rule (PRD
+  §6 / task 3.4), recorded as ADR-0012. New pure engine module `engine/src/chordlatch.rs`
+  (ADR-0002 pure-core + thin-wasm-wrapper): `ChordLatchCore` holds a **pending** selection (hovered
+  hex cell index + `ChordQuality`) updated every frame and a **committed** (sounding) selection that
+  only moves when `commit()` is called. `set_pending` holds the last valid root on a negative (off-
+  flower) root and the last quality on `Unknown`, so a transient frame can't arm a silent "no chord"
+  strum; the committed chord **persists** across tracking loss (frontend never resets the latch per-
+  frame, unlike the hexmap/finger-count detectors). Exported `#[wasm_bindgen] ChordLatch`
+  (`setPending`, `commit(): bool`, `committedRoot/committedQuality/pendingRoot/pendingQuality`
+  getters, `reset`) via `lib.rs`. Wired the whole chain into the render loop (`src/main.ts`): for the
+  first time the `FingerCountDetector` (3.3) runs live — `processChord` flattens the chord hand's 21
+  landmarks to the 42-value `Float64Array` (ADR-0008), gets the quality, and feeds hovered root +
+  quality to `chordLatch.setPending`; on chord-hand loss it resets the finger-count detector
+  (ADR-0011) but leaves the latch alone. `processStrum` now calls `chordLatch.commit()` when the
+  strum detector returns ≥1 crossing this frame, *before* the pluck voices fire. The status bar's
+  CHORD field now shows the *sounding* (committed) chord — new pure, unit-tested `src/chord.ts`
+  (`chordLabel`) formats root letter + quality suffix (`""`/`m`/`7`) — instead of the live hovered
+  cell (the flower accent still shows hover). engine.ts re-exports `ChordLatch`, `FingerCountDetector`,
+  `ChordQuality` + instance types; freed the new wasm objects on beforeunload.
+- tested: `cd engine && cargo test` → 86 passed / 0 failed (was 76; +10 chordlatch tests): starts
+  empty/major, pending updates don't touch committed, commit moves pending→committed, **chord only
+  changes on commit never mid-ring** (roam the left hand across cells while ringing, committed stays),
+  commit reports unchanged on a re-strum of the same chord, negative root holds last valid pending
+  root, Unknown quality holds last pending quality, **committed chord persists without a reset**
+  (simulated dropout), reset fully clears both layers, quality-only change commits. `npm run test` →
+  11 files / 95 tests pass (+10 in `src/chord.test.ts`: suffix per quality incl. unknown/out-of-range,
+  label major/minor/dom7, null/undefined/empty-root placeholder, em-dash). `npm run typecheck` exit 0;
+  `npm run build:engine` → wasm clean (`engine.d.ts` now exports `class ChordLatch`); `npm run build`
+  → clean (20 modules, engine_bg wasm 40.49 kB bundled). No faked passes.
+- next: task 3.5 — chord shape data table (A–G, major/minor, 6-string fret positions) wired into the
+  audio engine so the committed hex root + quality actually changes the note set `setChord()` plays.
+- needs human verification: none for the pure logic (latch + label fully tested, deterministic). The
+  *feel* of the rule on a real camera — that moving the fretting hand doesn't change the sound until
+  you strum, that the committed chord in the status bar matches what you hear, and that committing on
+  the first crossing frame of a stroke feels right (vs. a stricter one-commit-per-stroke) — needs a
+  real camera + hands + speakers; belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist. The
+  committed chord doesn't yet change the audible notes (still the placeholder test chord) until 3.5.

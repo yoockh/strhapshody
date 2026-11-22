@@ -45,7 +45,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       the active hex.
 - [x] 3.3 Finger-count gesture classification (index / index+middle / index+middle+ring) as a
       Rust/WASM function; unit tests with synthetic extended/curled finger landmark configs.
-- [ ] 3.4 Chord-change-only-between-strums rule: wire hex+gesture state through the strum
+- [x] 3.4 Chord-change-only-between-strums rule: wire hex+gesture state through the strum
       engine so the sounding chord only updates on a strum boundary, never mid-ring.
 - [ ] 3.5 Chord shape data table (A–G, major/minor, 6-string fret positions) wired into the
       audio engine so hex + gesture actually changes what note set strums play.

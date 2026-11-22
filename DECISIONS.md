@@ -341,3 +341,49 @@ with the hovered hex root to a strum boundary; task 3.5 maps (root, quality) to 
 Changing the `hold_frames` default or the `EXTENDED_MIN`/`CURLED_MAX` thresholds (shared with
 `gesture`) is feel-tuning (Phase 6.2 sliders / 7.3 checklist), not an ADR change; only changing the
 clean-pattern rule, the default quality, or the hold-on-`Unknown` behaviour would supersede this.
+
+## ADR-0012: Chord latch — pending/committed split, commit on strum boundary, committed chord persists
+
+**Context:** task 3.4 is the "chord changes only between strums" rule (PRD §6): a guitarist's chord
+doesn't change the instant the fretting hand moves — it changes when the picking hand next strikes.
+So the *sounding* chord must update only at a strum boundary, never mid-ring. Three contract
+questions had to be settled, and task 3.5 (chord→note-set) inherits them: (a) where this rule's
+state lives and how it's shaped; (b) what a strum "boundary" is in the per-frame pipeline; (c) how
+transient left-hand loss / off-flower frames are handled so the ringing chord isn't dropped.
+
+**Decision:**
+1. **Pure engine module `chordlatch.rs` with a pending/committed split (ADR-0002).** `ChordLatchCore`
+   holds a **pending** selection (root cell index `i32` + `ChordQuality`), updated every frame from
+   the hovered hex cell (ADR-0010) and the finger-count quality (ADR-0011), and a **committed**
+   selection — the sounding chord — that only changes when `commit()` is called. `commit()` copies
+   pending→committed and returns whether it actually changed. The `#[wasm_bindgen] ChordLatch`
+   wrapper is thin (`setPending(root, quality)`, `commit() -> bool`, `committedRoot`/
+   `committedQuality`/`pendingRoot`/`pendingQuality` getters, `reset()`), matching the stateful-
+   detector pattern of strum/gesture/hexmap/fingercount. One instance holds the app's sounding chord.
+2. **Strum boundary = a crossing frame; commit before the voices fire.** The frontend calls
+   `chordLatch.commit()` in `processStrum` whenever the strum detector returns ≥1 `StrumEvent` this
+   frame, *before* triggering the pluck voices, so the strum that armed the change also sounds it.
+   Committing once per crossing frame is a no-op when the selection hasn't moved, so a multi-frame
+   single stroke doesn't matter. "Never mid-ring" is satisfied because `commit()` is the *only* path
+   that changes the committed chord — while a chord rings out with no crossing, the left hand can roam
+   freely and the sounding chord stays put (regression-tested).
+3. **Hold-last / persist rules (mirror ADR-0010/0011).** `set_pending` with a negative root (cursor
+   outside the flower) *keeps* the last valid pending root; an `Unknown` quality keeps the last
+   pending quality — a transient off-flower / ambiguous frame must not arm a silent "no chord" strum.
+   The committed chord **persists** across chord-hand tracking loss: the frontend does NOT reset the
+   latch per-frame (unlike the hexmap selector / finger-count detector, which it *does* reset on loss
+   for a clean cursor re-entry). `reset()` is a full clear for app-reset/tests only. A brief dropout
+   therefore can't drop the ringing chord (regression-tested).
+
+**Consequences:** the status bar's CHORD field now shows the *sounding* (committed) chord — root
+letter via `HexMap.cellChord` + a quality suffix (`""`/`m`/`7`) formatted by the pure, unit-tested
+`src/chord.ts` (`chordLabel`) — which only changes on a strum; the hovered-but-not-yet-strummed cell
+is still shown by the flower's accent, so hover feedback isn't lost. Before the first strum the field
+shows an em-dash placeholder. Task 3.5 reads `committedRoot`/`committedQuality` to pick the note set
+`setChord()` loads; until then the voices still play the placeholder open-string test chord, so 3.4's
+observable effect is the latched status-bar chord. The finger-count detector is now wired into the
+live render loop for the first time (`processChord` flattens the chord hand's landmarks to the
+42-value `Float64Array` of ADR-0008 and feeds `FingerCountDetector.update`). Changing *when* the
+frontend commits (e.g. only on the first crossing of a stroke rather than any crossing frame) or the
+chord-label formatting is not an ADR change; only changing the pending/committed split, the
+commit-on-boundary contract, or the hold/persist rules would supersede this.

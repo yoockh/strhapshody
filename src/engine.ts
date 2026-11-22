@@ -14,11 +14,22 @@
  * browser+wasm path is exercised by the Playwright e2e suite, task 7.1).
  */
 
-import init, { StrumDetector, HexMap, OneEuroFilter } from "../engine/pkg/engine.js";
+import init, {
+  StrumDetector,
+  HexMap,
+  OneEuroFilter,
+  FingerCountDetector,
+  ChordLatch,
+} from "../engine/pkg/engine.js";
 export { StrumDetector } from "../engine/pkg/engine.js";
 export { StrumDirection } from "../engine/pkg/engine.js";
 export type { StrumEvent } from "../engine/pkg/engine.js";
 export { HexMap, OneEuroFilter } from "../engine/pkg/engine.js";
+export {
+  FingerCountDetector,
+  ChordLatch,
+  ChordQuality,
+} from "../engine/pkg/engine.js";
 
 let ready: Promise<void> | null = null;
 
@@ -38,3 +49,5 @@ export function initEngine(): Promise<void> {
 export type StrumDetectorInstance = InstanceType<typeof StrumDetector>;
 export type HexMapInstance = InstanceType<typeof HexMap>;
 export type OneEuroFilterInstance = InstanceType<typeof OneEuroFilter>;
+export type FingerCountDetectorInstance = InstanceType<typeof FingerCountDetector>;
+export type ChordLatchInstance = InstanceType<typeof ChordLatch>;

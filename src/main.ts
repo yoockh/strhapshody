@@ -25,15 +25,20 @@ import {
   StrumDetector,
   HexMap,
   OneEuroFilter,
+  FingerCountDetector,
+  ChordLatch,
   type StrumDetectorInstance,
   type HexMapInstance,
   type OneEuroFilterInstance,
+  type FingerCountDetectorInstance,
+  type ChordLatchInstance,
 } from "./engine.ts";
 import {
   computeHexFlowerLayout,
   drawHexFlower,
   type HexCell,
 } from "./hexflower.ts";
+import { chordLabel } from "./chord.ts";
 import { createAudioEngine, type AudioEngine } from "./audio.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
@@ -49,6 +54,22 @@ function toRawHands(result: HandLandmarkerResult): RawHand[] {
     hands.push({ handedness, score: category?.score ?? 0, landmarks });
   }
   return hands;
+}
+
+/**
+ * Flatten a hand's 21 MediaPipe landmarks into the interleaved `[x0,y0,…x20,y20]`
+ * `Float64Array` the engine's landmark consumers expect (ADR-0008). Only the
+ * normalized image-plane x,y are used; the finger-count metric is scale/rotation/
+ * translation invariant so the raw normalized coords are fed directly (no canvas
+ * mapping needed).
+ */
+function flattenLandmarks(lm: ReadonlyArray<{ x: number; y: number }>): Float64Array {
+  const flat = new Float64Array(lm.length * 2);
+  for (let i = 0; i < lm.length; i++) {
+    flat[i * 2] = lm[i]!.x;
+    flat[i * 2 + 1] = lm[i]!.y;
+  }
+  return flat;
 }
 
 const canvas = document.querySelector<HTMLCanvasElement>("#stage");
@@ -96,6 +117,17 @@ const HEX_HYSTERESIS_FRACTION = 0.18;
 const CURSOR_MIN_CUTOFF = 1.5;
 const CURSOR_BETA = 0.01;
 const CURSOR_D_CUTOFF = 1.0;
+
+// Chord-selection state (task 3.4). The left hand's extended-finger count sets
+// the chord *quality* (ADR-0011); the hovered hex cell sets the *root*. Both
+// feed a `ChordLatch` (ADR-0012) as the live "pending" selection, but the
+// *sounding* chord only commits on a strum boundary (see processStrum), so it
+// never changes mid-ring. `fingerCount` is reset on chord-hand loss (ADR-0011);
+// the latch is deliberately NOT reset per-frame so a brief dropout can't drop
+// the ringing chord.
+let fingerCount: FingerCountDetectorInstance | null = null;
+let chordLatch: ChordLatchInstance | null = null;
+const FINGER_COUNT_HOLD_FRAMES = 3;
 
 try {
   audioEngine = createAudioEngine();
@@ -186,12 +218,15 @@ function render(): void {
   drawStrings(ctx, width / 2, width, barH, height);
 
   // Chord flower in the left zone (task 3.2): draw the 7-cell hex flower, track
-  // the left hand's smoothed palm cursor, and highlight the hovered cell. The
-  // hovered chord letter feeds the status bar below.
-  const hoveredChord = processChord(ctx, assignments, barH, width, height);
+  // the left hand's smoothed palm cursor, highlight the hovered cell, and feed
+  // the hovered root + finger-count quality into the chord latch as the live
+  // pending selection (task 3.4).
+  processChord(ctx, assignments, barH, width, height);
 
   // Strum detection → audio (task 2.4): feed the right hand's palm y to the
   // WASM strum detector and pluck a string voice for every crossing it reports.
+  // Each strum is also the boundary at which the pending chord commits to the
+  // sounding chord (task 3.4), so the chord never changes mid-ring.
   processStrum(assignments, barH, width, height);
 
   // Hand skeleton on top of the tints (mirror baked into the coordinates).
@@ -208,9 +243,10 @@ function render(): void {
     );
   }
 
-  // Status bar skeleton (PRD §5). Chord now reflects the live hovered hex;
-  // instrument stays a placeholder until Phase 5.
-  drawStatusBar(ctx, width, height, buildStatusModel(assignments, hoveredChord));
+  // Status bar skeleton (PRD §5). Chord reflects the *sounding* (committed) chord
+  // — it only changes on a strum (task 3.4); the hovered-but-not-yet-strummed
+  // cell is shown by the flower's accent. Instrument is a placeholder (Phase 5).
+  drawStatusBar(ctx, width, height, buildStatusModel(assignments));
 
   // Graceful error path: permission denied, no device, camera in use, etc.
   if (cameraError) {
@@ -267,6 +303,16 @@ function processStrum(
   const point = landmarkToCanvas(palm, videoWidth, videoHeight, width, height, true);
 
   const events = strumDetector.push(point.y, performance.now() / 1000);
+
+  // A strum boundary: commit the pending chord selection to the sounding chord
+  // *before* the voices fire, so the strum that armed the change also sounds it
+  // (task 3.4). Committing once per crossing frame is a no-op when the selection
+  // hasn't moved. (Task 3.5 will make the committed chord drive the note set;
+  // for now the voices still play the placeholder test chord.)
+  if (events.length > 0) {
+    chordLatch?.commit();
+  }
+
   for (const ev of events) {
     const index = ev.string_index;
     const velocity = ev.velocity;
@@ -281,10 +327,12 @@ function processStrum(
  * Rebuilds the WASM `HexMap` when the left-zone geometry changes (resize), maps
  * the chord hand's palm centre into canvas pixels through the same cover-crop +
  * mirror transform as the overlay, One-Euro-smooths it (ADR-0006), and feeds it
- * to `HexMap.update()` to get the hovered cell with border hysteresis. When no
- * chord hand is tracked it resets the selector + filters so a hand re-entering
- * the frame doesn't snap the cursor across the flower. Returns the hovered
- * chord letter (or null) for the status bar.
+ * to `HexMap.update()` to get the hovered cell with border hysteresis, and feeds
+ * that hovered root plus the finger-count quality into the chord latch as the
+ * live pending selection (task 3.4). When no chord hand is tracked it resets the
+ * selector + filters + finger-count detector so a hand re-entering the frame
+ * doesn't snap the cursor across the flower; the latch is left alone so the
+ * sounding chord persists.
  */
 function processChord(
   ctx: CanvasRenderingContext2D,
@@ -292,8 +340,8 @@ function processChord(
   barH: number,
   width: number,
   height: number,
-): string | null {
-  if (!engineReady) return null;
+): void {
+  if (!engineReady) return;
 
   // (Re)build the hex flower when the left-zone rectangle changes.
   const layout = computeHexFlowerLayout(0, barH, width / 2, height);
@@ -316,6 +364,12 @@ function processChord(
   if (!cursorFilterY) {
     cursorFilterY = new OneEuroFilter(CURSOR_MIN_CUTOFF, CURSOR_BETA, CURSOR_D_CUTOFF);
   }
+  if (!fingerCount) {
+    fingerCount = new FingerCountDetector(FINGER_COUNT_HOLD_FRAMES);
+  }
+  if (!chordLatch) {
+    chordLatch = new ChordLatch();
+  }
 
   const chordHand = assignments.find((a) => a.role === "chord");
   const lm =
@@ -336,11 +390,20 @@ function processChord(
       y: cursorFilterY.filter(raw.y, t),
     };
     activeIndex = hexMap.update(cursor.x, cursor.y);
+    // Chord *quality* from the extended-finger count (raw normalized landmarks;
+    // the metric is scale/rotation invariant). Feed hovered root + quality to the
+    // latch as the live pending selection — it won't sound until the next strum.
+    const quality = fingerCount.update(flattenLandmarks(lm));
+    chordLatch.setPending(activeIndex, quality);
   } else {
-    // No tracked chord hand — re-seed selector + smoothing for a clean re-entry.
+    // No tracked chord hand — re-seed selector + smoothing for a clean re-entry,
+    // and the finger-count detector back to its default (ADR-0011). The latch is
+    // intentionally left untouched so the sounding chord persists through a brief
+    // dropout and the pending selection freezes rather than drifting to "none".
     hexMap.reset();
     cursorFilterX.reset();
     cursorFilterY.reset();
+    fingerCount.reset();
   }
 
   const cellCount = hexMap.cellCount();
@@ -353,19 +416,15 @@ function processChord(
     });
   }
   drawHexFlower(ctx, cells, hexMap.radius(), activeIndex, cursor);
-
-  return activeIndex >= 0 ? hexMap.cellChord(activeIndex) : null;
 }
 
 /**
- * Build the status-bar model for this frame. Chord reflects the live hovered hex
- * (task 3.2), instrument is a placeholder (Phase 5); tracking health reflects the
- * real pipeline state so the skeleton is informative rather than static.
+ * Build the status-bar model for this frame. Chord reflects the *sounding*
+ * (committed) chord from the latch — root letter + quality suffix, e.g. `C`,
+ * `Cm`, `C7` — which only changes on a strum (task 3.4). Instrument is a
+ * placeholder (Phase 5); tracking health reflects the real pipeline state.
  */
-function buildStatusModel(
-  assignments: AssignedHand[],
-  hoveredChord: string | null,
-): StatusBarModel {
+function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
   let tracking: string;
   if (cameraError) tracking = "camera off";
   else if (!webcam) tracking = "starting camera…";
@@ -373,11 +432,23 @@ function buildStatusModel(
   else tracking = trackingSummary(assignments).label;
 
   return {
-    chord: hoveredChord ?? "—",
+    chord: committedChordLabel(),
     mode: "Chord",
     instrument: "Acoustic",
     tracking,
   };
+}
+
+/**
+ * The sounding chord's display label from the latch's committed selection: the
+ * root cell's letter (via `HexMap.cellChord`) plus the quality suffix. Shows the
+ * em-dash placeholder until the first chord has been strummed in.
+ */
+function committedChordLabel(): string {
+  if (!chordLatch || !hexMap) return chordLabel(null, 0);
+  const root = chordLatch.committedRoot;
+  const letter = root >= 0 && root < hexMap.cellCount() ? hexMap.cellChord(root) : null;
+  return chordLabel(letter, chordLatch.committedQuality);
 }
 
 requestAnimationFrame(render);
@@ -391,4 +462,6 @@ window.addEventListener("beforeunload", () => {
   hexMap?.free();
   cursorFilterX?.free();
   cursorFilterY?.free();
+  fingerCount?.free();
+  chordLatch?.free();
 });
