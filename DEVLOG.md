@@ -597,3 +597,51 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   deliberately, and the default strip size/placement need a real camera + hands; belongs on the Phase
   6.2 tuning + Phase 7.3 manual checklist. The module isn't in the render loop yet (4.2/4.3 consume
   it).
+
+## 2026-11-22 13:18 WIB — task 4.2 Power Chord Strip UI + Chord/Power mode switch
+
+- did: built the power-chord strip UI above the hex flower and the Chord↔Power mode switch (PRD §7 /
+  task 4.2), wiring the `powerstrip` engine module (4.1) into the live render loop for the first
+  time. No new ADR — ADR-0013 already anticipated this ("the Power/Chord mode latch and any
+  dwell/hysteresis on the mode boundary belong to the frontend wiring in task 4.2, above this
+  module"); the strip-size/placement fractions and the gap-band hysteresis are the feel-tuning that
+  ADR explicitly leaves to the frontend / Phase 6.2 sliders. Following the ADR-0002 split:
+  * `src/powerstrip.ts` — PURE, unit-tested: `computeLeftZoneLayout` carves a strip band off the top
+    of the left zone (inset by a margin fraction, `stripHeightFraction` tall) and leaves the rest,
+    below a neutral `gapFraction` band, for the hex flower — all fractions clamped so a degenerate /
+    non-finite / inverted zone still yields non-inverted, finite rects; `rectContains` (edge-inclusive,
+    null/non-finite → outside); and `nextPlayMode(current, inStrip, inHexArea)` — the mode rule:
+    cursor on the strip → Power, in the hex area → Chord, in the gap / no hand → **hold** the current
+    mode (the gap gives the boundary hysteresis so it can't flicker, and a brief hand dropout can't
+    flip the mode). Plus the thin DOM `drawPowerStrip` (strip rect accented in Power mode, fret-marker
+    ticks + inlay dots at 3/5/7/9 and a double dot at 12, the string-pair midline with "E/A" / "A/D"
+    labels, a POWER caption, and a hovered-fret-column highlight in the hovered half) — not unit-tested
+    (needs a 2D context), exercised by e2e/human.
+  * `src/engine.ts` — re-export `PowerStrip` + `PowerPair` and the `PowerStripInstance` type so the
+    frontend reaches the 4.1 class through the one init wrapper.
+  * `src/main.ts` — `processChord` now computes the left-zone split, (re)builds a `PowerStrip` sized to
+    the strip rect on geometry change (caching the `fretMarkerX` centres), builds the hex flower in the
+    strip-reduced hex area (the flower shifted down to make room), tracks `playMode` from the smoothed
+    cursor via `nextPlayMode`, and draws the strip (accented + hovered fret/pair when in Power mode).
+    The status bar's MODE field now shows the live `playMode` (was hardcoded "Chord"). Freed the new
+    wasm object on beforeunload. The strip only switches mode + draws for 4.2; restricting the strum to
+    the root/fifth/octave strings and the "G5 (fret 3, low E)" readout is task 4.3.
+- tested: `npm run test` → 13 files / 125 tests pass (+16 in `src/powerstrip.test.ts`: strip-above-hex
+  ordering, the 40px neutral gap, left/right/top insets, hex area spanning the full width, non-inverted
+  rects on three degenerate zones, non-finite-input clamping, hex-top floored to the zone bottom on a
+  tiny zone; rectContains interior/edge/outside/null/non-finite; nextPlayMode enter-Power / return-Chord
+  / hold-in-gap / hold-on-dropout / strip-priority / no-flicker round trip). `npm run typecheck` exit 0;
+  `npm run test:engine` → cargo 106 passed / 0 failed (engine untouched this task); `npm run build` →
+  clean (22 modules, engine_bg wasm 44.53 kB bundled). No faked passes.
+- next: task 4.3 — Power-mode strumming restricted to the 2 (optionally 3 with octave) relevant
+  strings; status bar shows the note name e.g. "G5 (fret 3, low E)". Reads `fretAtX`/`pairAtY` +
+  `rootString`/`fifthString`/`octaveString` (and the new `playMode` state) to gate the strum voices and
+  format the readout; the note-name math lives in TS alongside `notes.ts`/`chords.ts` (ADR-0013 §4).
+- needs human verification: the look/placement of the strip above the flower (does the band read as a
+  fretboard strip, do the inlay dots + pair labels make the mapping obvious), and crucially whether
+  moving the left hand up into the strip *feels* like a deliberate Chord→Power switch (is the band in a
+  comfortable reach, is the gap-band hysteresis wide enough to not flicker but not so wide it feels
+  sticky) — all need a real camera + hands. Correct by construction (pure layout + mode logic unit-
+  tested, geometry cargo-tested in 4.1, build/typecheck green) but not visually confirmed in this
+  camera-less env. Belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist; the pipeline gets a
+  deterministic exercise via the Playwright suite (7.1).

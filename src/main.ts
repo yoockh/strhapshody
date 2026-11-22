@@ -27,17 +27,26 @@ import {
   OneEuroFilter,
   FingerCountDetector,
   ChordLatch,
+  PowerStrip,
   type StrumDetectorInstance,
   type HexMapInstance,
   type OneEuroFilterInstance,
   type FingerCountDetectorInstance,
   type ChordLatchInstance,
+  type PowerStripInstance,
 } from "./engine.ts";
 import {
   computeHexFlowerLayout,
   drawHexFlower,
   type HexCell,
 } from "./hexflower.ts";
+import {
+  computeLeftZoneLayout,
+  drawPowerStrip,
+  nextPlayMode,
+  rectContains,
+  type PlayMode,
+} from "./powerstrip.ts";
 import { chordLabel } from "./chord.ts";
 import { chordFrequencies } from "./chords.ts";
 import { createAudioEngine, type AudioEngine } from "./audio.ts";
@@ -129,6 +138,20 @@ const CURSOR_D_CUTOFF = 1.0;
 let fingerCount: FingerCountDetectorInstance | null = null;
 let chordLatch: ChordLatchInstance | null = null;
 const FINGER_COUNT_HOLD_FRAMES = 3;
+
+// Power-chord strip + mode state (task 4.2). A horizontal strip above the hex
+// flower (ADR-0013): when the left-hand cursor is over it the app is in Power
+// mode, when it returns to the hex area it's back in Chord mode (the neutral gap
+// between holds the current mode, for hysteresis). The sounding behaviour of
+// Power mode — restricting the strum to the root/fifth/octave strings and the
+// "G5 (fret 3, low E)" status readout — is task 4.3; this task is the UI + the
+// mode switch only. The strip is rebuilt when the left-zone geometry changes.
+let powerStrip: PowerStripInstance | null = null;
+let powerGeometry = "";
+let powerMarkerXs: number[] = [];
+let playMode: PlayMode = "Chord";
+// Highest selectable fret (PRD §7: "0 to 12").
+const POWER_STRIP_MAX_FRET = 12;
 
 try {
   audioEngine = createAudioEngine();
@@ -344,8 +367,37 @@ function processChord(
 ): void {
   if (!engineReady) return;
 
-  // (Re)build the hex flower when the left-zone rectangle changes.
-  const layout = computeHexFlowerLayout(0, barH, width / 2, height);
+  // Carve the left zone into a power-strip band (top) and the hex-flower area
+  // (below), with a neutral gap between for mode-switch hysteresis (task 4.2).
+  const zone = computeLeftZoneLayout(0, barH, width / 2, height);
+
+  // (Re)build the power strip when its rectangle changes, caching the fret
+  // marker centres for the renderer.
+  const stripSig = `${Math.round(zone.strip.left)},${Math.round(
+    zone.strip.top,
+  )},${Math.round(zone.strip.right)},${Math.round(zone.strip.bottom)}`;
+  if (!powerStrip || stripSig !== powerGeometry) {
+    powerStrip?.free();
+    powerStrip = new PowerStrip(
+      zone.strip.left,
+      zone.strip.top,
+      zone.strip.right,
+      zone.strip.bottom,
+      POWER_STRIP_MAX_FRET,
+    );
+    powerGeometry = stripSig;
+    const count = powerStrip.fretCount();
+    powerMarkerXs = [];
+    for (let f = 0; f < count; f++) powerMarkerXs.push(powerStrip.fretMarkerX(f));
+  }
+
+  // (Re)build the hex flower when the (now strip-reduced) hex area changes.
+  const layout = computeHexFlowerLayout(
+    zone.hexArea.left,
+    zone.hexArea.top,
+    zone.hexArea.right,
+    zone.hexArea.bottom,
+  );
   const sig = `${Math.round(layout.cx)},${Math.round(layout.cy)},${Math.round(
     layout.radius,
   )}`;
@@ -407,6 +459,12 @@ function processChord(
     fingerCount.reset();
   }
 
+  // Mode switch (task 4.2): cursor on the strip → Power, in the hex area →
+  // Chord, in the gap / no hand → hold the current mode (ADR-0013 hysteresis).
+  const inStrip = cursor ? powerStrip.contains(cursor.x, cursor.y) : false;
+  const inHexArea = rectContains(zone.hexArea, cursor);
+  playMode = nextPlayMode(playMode, inStrip, inHexArea);
+
   const cellCount = hexMap.cellCount();
   const cells: HexCell[] = [];
   for (let i = 0; i < cellCount; i++) {
@@ -417,6 +475,22 @@ function processChord(
     });
   }
   drawHexFlower(ctx, cells, hexMap.radius(), activeIndex, cursor);
+
+  // The power strip above the flower, accented + showing the hovered fret column
+  // when in Power mode (the restricted strum + note readout are task 4.3).
+  let activeFret = -1;
+  let activePair = -1;
+  if (playMode === "Power" && cursor) {
+    activeFret = powerStrip.fretAtX(cursor.x);
+    activePair = powerStrip.pairAtY(cursor.y);
+  }
+  drawPowerStrip(
+    ctx,
+    { rect: zone.strip, markerXs: powerMarkerXs },
+    playMode === "Power",
+    activeFret,
+    activePair,
+  );
 }
 
 /**
@@ -434,7 +508,7 @@ function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
 
   return {
     chord: committedChordLabel(),
-    mode: "Chord",
+    mode: playMode,
     instrument: "Acoustic",
     tracking,
   };
@@ -482,4 +556,5 @@ window.addEventListener("beforeunload", () => {
   cursorFilterY?.free();
   fingerCount?.free();
   chordLatch?.free();
+  powerStrip?.free();
 });

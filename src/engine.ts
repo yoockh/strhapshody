@@ -20,6 +20,7 @@ import init, {
   OneEuroFilter,
   FingerCountDetector,
   ChordLatch,
+  PowerStrip,
 } from "../engine/pkg/engine.js";
 export { StrumDetector } from "../engine/pkg/engine.js";
 export { StrumDirection } from "../engine/pkg/engine.js";
@@ -30,6 +31,7 @@ export {
   ChordLatch,
   ChordQuality,
 } from "../engine/pkg/engine.js";
+export { PowerStrip, PowerPair } from "../engine/pkg/engine.js";
 
 let ready: Promise<void> | null = null;
 
@@ -51,3 +53,4 @@ export type HexMapInstance = InstanceType<typeof HexMap>;
 export type OneEuroFilterInstance = InstanceType<typeof OneEuroFilter>;
 export type FingerCountDetectorInstance = InstanceType<typeof FingerCountDetector>;
 export type ChordLatchInstance = InstanceType<typeof ChordLatch>;
+export type PowerStripInstance = InstanceType<typeof PowerStrip>;
