@@ -522,3 +522,40 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   the first crossing frame of a stroke feels right (vs. a stricter one-commit-per-stroke) — needs a
   real camera + hands + speakers; belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist. The
   committed chord doesn't yet change the audible notes (still the placeholder test chord) until 3.5.
+
+## 2026-11-22 13:10 WIB — task 3.5 chord shape data table → audio note set
+
+- did: closed the last Phase-3 box — the hovered hex root + finger-count quality now actually change
+  what note set a strum plays (PRD §6). New pure, unit-tested `src/chords.ts` (ADR-0002 split; no new
+  ADR — it realises ADR-0009's `setChord()` note-set contract and the ADR-0012 commit boundary):
+  a **fret-position table** of standard guitar chord shapes — one fret per string in standard tuning,
+  index 0 = low E (E2) … 5 = high e (E4), matching `STRING_NOTE_NAMES`/`OPEN_STRING_NOTES` — for every
+  A–G in major, minor, and the stretch-goal dominant-7th. Open-position voicings where one exists
+  (C `x32010`, D, E, Em, Am, G, A, D7, E7, …) and E-shape / A-shape barre shapes for the roots with no
+  natural open voicing (B major, C/F/G minor, F major, etc.), so every mapping is a real, correctly-
+  voiced chord. `MUTED` (-1) marks an unsounded string. `chordShape(root, quality)` is case-insensitive,
+  trims, falls back to the major table for `Unknown`, returns `null` for a non-A–G root;
+  `chordFrequencies(root, quality)` resolves each non-muted string to `midiToFrequency(open+fret)` and
+  yields **0 Hz for muted strings / unknown roots** — the audio engine's `pluck` already treats a
+  non-positive freq as "don't sound this string" (ADR-0009), so no `audio.ts` change was needed.
+  Wired into `src/main.ts`: `processStrum` now commits *and*, when the committed chord actually changes,
+  calls new `applyCommittedChord()` → maps `chordLatch.committedRoot`→`HexMap.cellChord` letter +
+  `committedQuality`, builds the frequency set, and hands it to `audioEngine.setChord()` — so the strum
+  that commits the change also sounds the new chord. Nothing valid committed yet (root < 0) leaves the
+  engine's default open-string test chord intact rather than silencing it.
+- tested: `npm run test` → 12 files / 109 tests pass (+14 in `src/chords.test.ts`: six-string ref order/
+  MIDI, shape lookup for every A–G × 3 qualities, case/trim-insensitivity, unknown/empty/null root →
+  null, Unknown→major fallback, major≠minor per root; **harmonic correctness** — every major/minor/dom7
+  voicing sounds only chord tones and contains the root (and the minor 3rd / the b7), checked against
+  theory-derived pitch-class sets; C major = classic `x32010`; `chordFrequencies` six entries, 0 for
+  muted, exact open+fret frequency on D major, all-zero for unknown root no-throw, A maj≠A min).
+  `npm run typecheck` exit 0; `npm run build` → clean (21 modules, engine_bg wasm 40.49 kB bundled);
+  `npm run test:engine` → cargo 86 passed / 0 failed (engine untouched this task). No faked passes.
+- next: task 4.1 — Rust/WASM `powerstrip` module: fret-from-horizontal-position (0–12 with marker
+  positions) and string-pair-from-height (upper = 6th+5th, lower = 5th+4th), with unit tests.
+- needs human verification: none for the pure logic (chord table + wiring fully tested, deterministic).
+  Whether each chord *sounds* right through the placeholder triangle-osc timbre, whether the barre-shape
+  voicings for C/F/G minor + B major sound as good as the open ones, and that strumming a hovered cell
+  audibly changes the chord on a real camera + speakers — need Yaya's machine; belongs on the Phase 7.3
+  manual checklist and gets a deterministic exercise via the Playwright keyboard-fallback + Web-Audio
+  suite in task 7.1. Phase 3 is now complete; Phase 4 (power chords) is next.

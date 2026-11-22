@@ -39,6 +39,7 @@ import {
   type HexCell,
 } from "./hexflower.ts";
 import { chordLabel } from "./chord.ts";
+import { chordFrequencies } from "./chords.ts";
 import { createAudioEngine, type AudioEngine } from "./audio.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
@@ -307,10 +308,10 @@ function processStrum(
   // A strum boundary: commit the pending chord selection to the sounding chord
   // *before* the voices fire, so the strum that armed the change also sounds it
   // (task 3.4). Committing once per crossing frame is a no-op when the selection
-  // hasn't moved. (Task 3.5 will make the committed chord drive the note set;
-  // for now the voices still play the placeholder test chord.)
-  if (events.length > 0) {
-    chordLatch?.commit();
+  // hasn't moved. When the committed chord actually changes, load its six-string
+  // note set into the audio engine (task 3.5) so this strum plays the new chord.
+  if (events.length > 0 && chordLatch?.commit()) {
+    applyCommittedChord();
   }
 
   for (const ev of events) {
@@ -449,6 +450,23 @@ function committedChordLabel(): string {
   const root = chordLatch.committedRoot;
   const letter = root >= 0 && root < hexMap.cellCount() ? hexMap.cellChord(root) : null;
   return chordLabel(letter, chordLatch.committedQuality);
+}
+
+/**
+ * Load the latch's committed (sounding) chord into the audio engine's note set
+ * (task 3.5). Maps the committed hex root cell to its chord letter
+ * (`HexMap.cellChord`) and quality, resolves the fret-position table to six
+ * per-string frequencies, and hands them to `setChord()`. Called on a strum
+ * boundary after a chord *change* commits. If nothing valid is committed yet
+ * (root < 0 — no cell ever hovered), the engine keeps its default open-string
+ * test chord rather than being silenced.
+ */
+function applyCommittedChord(): void {
+  if (!audioEngine || !chordLatch || !hexMap) return;
+  const root = chordLatch.committedRoot;
+  if (root < 0 || root >= hexMap.cellCount()) return;
+  const letter = hexMap.cellChord(root);
+  audioEngine.setChord(chordFrequencies(letter, chordLatch.committedQuality));
 }
 
 requestAnimationFrame(render);
