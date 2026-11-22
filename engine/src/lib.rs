@@ -28,6 +28,9 @@ pub use hexmap::HexMap;
 pub mod chordlatch;
 pub use chordlatch::ChordLatch;
 
+pub mod powerstrip;
+pub use powerstrip::{PowerPair, PowerStrip};
+
 /// Trivial number round-trip: proves primitive values marshal across the
 /// JS <-> WASM boundary. Used by the TS round-trip test for task 0.2.
 #[wasm_bindgen]

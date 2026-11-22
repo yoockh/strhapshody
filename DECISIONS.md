@@ -387,3 +387,47 @@ live render loop for the first time (`processChord` flattens the chord hand's la
 frontend commits (e.g. only on the first crossing of a stroke rather than any crossing frame) or the
 chord-label formatting is not an ADR change; only changing the pending/committed split, the
 commit-on-boundary contract, or the hold/persist rules would supersede this.
+
+## ADR-0013: Power strip is stateless rectangle geometry — 13 equal fret cells, midline string-pair split, octave two strings below the root
+
+**Context:** task 4.1 is the `powerstrip` engine module (PRD §7). The left hand hovers a horizontal
+strip above the hex grid where **x selects the fret (0–12)** and **height selects the string pair**
+(upper = 6th+5th, lower = 5th+4th). Several contract questions had to be settled, and tasks 4.2 (strip
+UI + Power/Chord mode switch) and 4.3 (restricted strumming + "G5 (fret 3, low E)" display) inherit
+them: (a) how x maps to a discrete fret and where the fret markers sit; (b) how the height splits into
+the two pairs and which exact string indices each pair drives, including the optional octave; (c)
+whether the module is stateful (like hexmap/strum) or stateless; (d) where the note-name math lives.
+
+**Decision:**
+1. **13 equal-width fret cells, right edge clamps.** Frets `0..=max_fret` (default 12 per PRD §7) are
+   `max_fret + 1` equal cells spanning the strip width; `fret = floor((x−left)/cell_width)`, with the
+   inclusive right edge clamped to the top fret rather than overflowing to a phantom cell. x outside the
+   strip's horizontal span is "no fret" (`-1` at the boundary). `fret_marker_x(fret)` returns a cell's
+   *centre* for the renderer, and every marker round-trips back to its own fret (regression-tested).
+   Frets are monotonic in x so "moving right raises the pitch" (PRD §7) holds by construction.
+2. **Midline string-pair split; octave is two strings below the root.** The strip's height splits at its
+   midline — upper half → `PowerPair::Upper` (root on string 0 = 6th/low E, fifth on 1 = 5th/A), lower
+   half → `Lower` (root on 1 = 5th/A, fifth on 2 = 4th/D), using the `strings.ts` index convention
+   (0 = low E at top). The exact midline counts as Upper. The **optional octave** is the string two below
+   the root (Upper → 2 = 4th/D, Lower → 3 = 3rd/G), i.e. the standard E-shape / A-shape power-chord octave
+   that task 4.3 may add as the third strummed string. This realises ADR-0003 §1 (lowest pair is the
+   default) concretely.
+3. **Stateless, pure (ADR-0002).** Unlike the hexmap selector / strum detector, the strip has **no
+   hysteresis and no per-frame state** — it is pure rectangle geometry queried fresh each frame
+   (`fret_at_x`, `pair_at_y`, `contains`). The Power/Chord *mode* latch and any dwell/hysteresis on the
+   mode boundary belong to the frontend wiring in task 4.2, above this module, not inside it. Edges are
+   normalised (any argument order → `left<right`, `top<bottom`), and a degenerate or non-finite rectangle
+   is floored to a tiny positive extent so no query divides by zero.
+4. **No note names in the engine.** The module emits only the fret *number* and the affected *string
+   indices*; turning `(fret, string)` into "G5 (fret 3, low E)" is note math that stays in TypeScript
+   alongside `notes.ts`/`chords.ts` (task 4.3), matching where the chord-table note math already lives
+   (ADR-0009/3.5). Boundary encoding mirrors `HexMap`: fret as `i32` (`-1` = off-strip), pair as `i32`
+   (`-1` none / `0` upper / `1` lower), no Option shim in TS.
+
+**Consequences:** task 4.2 builds a `PowerStrip` sized to a strip rectangle above the hex flower, uses
+`contains()` on the smoothed left-palm cursor to switch into Power mode (and back to Chord mode on
+leaving), and draws fret markers at `fretMarkerX()`. Task 4.3 reads `fretAtX`/`pairAtY` + the
+`rootString`/`fifthString`/`octaveString` indices to restrict the strum voices and format the status-bar
+note name. Changing the default `max_fret`, the cell count, or adding mode-boundary hysteresis in the
+*frontend* is not an ADR change; only changing the equal-cell fret mapping, the midline split, the
+string-index/octave convention, or moving note-name math into the engine would supersede this.

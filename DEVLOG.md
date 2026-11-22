@@ -559,3 +559,41 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   audibly changes the chord on a real camera + speakers — need Yaya's machine; belongs on the Phase 7.3
   manual checklist and gets a deterministic exercise via the Playwright keyboard-fallback + Web-Audio
   suite in task 7.1. Phase 3 is now complete; Phase 4 (power chords) is next.
+
+## 2026-11-22 13:12 WIB — task 4.1 Rust/WASM `powerstrip` module (fret-from-x, string-pair-from-y)
+
+- did: opened Phase 4 with the power-chord strip geometry engine module
+  `engine/src/powerstrip.rs` (PRD §7), following the ADR-0002 pure-core + thin-wasm-wrapper pattern.
+  Pure `PowerStripCore` holds the strip rectangle + fret count; every query is **stateless** (no
+  hysteresis — unlike hexmap/strum; the Power/Chord mode latch is frontend work in 4.2). `fret_at_x`
+  maps x to a fret over `max_fret+1` (default 13) equal-width cells — `floor((x−left)/cell_width)`,
+  inclusive right edge clamped to the top fret, off-strip → None; frets are monotonic in x so "moving
+  right raises pitch" holds. `pair_at_y` splits the strip height at its midline → `PowerPair::Upper`
+  (root string 0 = 6th/low E, fifth 1 = 5th/A) / `Lower` (root 1 = 5th/A, fifth 2 = 4th/D), midline
+  counts as upper; the optional octave is two strings below the root (Upper→2, Lower→3, the standard
+  E-/A-shape octave). `fret_marker_x` gives a cell's centre for the 4.2 renderer. Edges normalised to
+  any argument order, degenerate/non-finite rect floored so no divide-by-zero, `max_fret` floored ≥1.
+  No note-name math in the engine (stays in TS, task 4.3). Thin `#[wasm_bindgen] PowerStrip` wrapper
+  mirrors HexMap's i32 boundary encoding: fret `-1`=off-strip, pair `-1`/`0`/`1`; plus
+  `root/fifth/octaveString(pair)` index getters, `contains`, `fretCount`, `maxFret`. Registered in
+  `lib.rs` (`pub mod powerstrip` + `pub use {PowerPair, PowerStrip}`). Recorded the fret-cell /
+  midline-split / octave-string / stateless contract as ADR-0013.
+- tested: `cd engine && cargo test` → 106 passed / 0 failed (was 86; +20 powerstrip tests): fret
+  count = max+1, left edge → 0, right edge clamps to max, mid-cell steps across all 13 frets,
+  off-strip → None, **monotonic frets (moving-right-raises-pitch)**, upper/lower pair string indices,
+  midline-counts-as-upper, pair off-strip → None, `contains` whole-rect incl. inclusive corners,
+  **fret-marker centres round-trip back to their own fret**, edges normalised regardless of argument
+  order, degenerate + non-finite rect guarded, max_fret floored ≥1, custom max_fret honoured, i32
+  boundary decode, wrapper string-index + boundary-encoding checks. `npm run build:engine` → wasm
+  compiles clean; `engine.d.ts` now exports `class PowerStrip` + `enum PowerPair`. `npm run typecheck`
+  exit 0; `npm run test` → 12 files / 109 tests still pass (frontend untouched — module not wired to
+  the render loop yet); `npm run build` → clean (engine_bg wasm 44.53 kB bundled). No faked passes.
+- next: task 4.2 — Power Chord Strip UI above the hex grid; entering it switches to Power mode,
+  leaving it back to Chord mode. Wires this module (`contains` for the mode switch, `fretMarkerX` for
+  the markers) into the live render loop for the first time.
+- needs human verification: none for the pure logic (strip geometry fully cargo-tested,
+  deterministic). The *feel* of the fret spacing (is 13 cells across the strip width comfortable to
+  hit a target fret), whether the midline split between the two string pairs is easy to land
+  deliberately, and the default strip size/placement need a real camera + hands; belongs on the Phase
+  6.2 tuning + Phase 7.3 manual checklist. The module isn't in the render loop yet (4.2/4.3 consume
+  it).
