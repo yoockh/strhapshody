@@ -766,3 +766,25 @@ optionalDependencies and both build and dev server work. If a future esbuild err
 - tested: the scratch repro script now reports no page errors after `beforeunload`; typecheck 0,
   `npm run test` 180 passed. Regression coverage: add a "dispatch beforeunload → no page error" case to
   the Playwright suite in task 7.1 (it needs a real browser + wasm, so it can't live in vitest).
+
+## 2026-11-23 15:30 WIB — task 6.1 first-run calibration
+
+- did: new pure `src/calibration.ts` (ADR-0018): `CalibrationSession` (intro 3 s → left 8 s → right 8 s →
+  done 1.5 s, records the active hand's normalised palm centre), `robustRange` (5–95th percentile box,
+  ≥ 30 samples), `calibratedZones` (pad 15%, minimum size, clamp into own half below the bar),
+  `validateCalibration`, plus canvas `drawCalibrationOverlay` (dim, half highlight, live dashed range box,
+  prompt + countdown, progress bar). New `src/storage.ts` (guarded localStorage JSON load/save, injectable
+  store). `main.ts`: zones computed per frame from the calibration; strings / strum detector / strip+hex
+  layout use them; auto-start on first run once tracking is live; Esc cancels; strum paused during
+  calibration and detector reset after; result merged with the previous one and saved. Controls panel
+  gains a Calibrate button.
+- tested: `npm run test` 203 passed (+23: storage round-trip / malformed / throwing store; robustRange
+  sample floor, coverage, outlier rejection, clamping; session phase schedule, ~20 s total, per-phase
+  recording, result with a missing hand, countdown + live box, NaN clock; validation; zones default,
+  fitting, half/bar clamping, minimum growth, missing hand, degenerate canvas). typecheck 0, build clean,
+  `cargo test` 135 unchanged. Browser: with a calibration injected into localStorage the strings band and
+  hex/strip visibly refit; Calibrate button present; overlay rendered on a test canvas and reviewed.
+- limitation here: MediaPipe assets are unreachable from this sandbox (CDN blocked), so the live flow
+  can't start in headless tests.
+- needs human verification: do the full 20 s flow with real hands — are the prompts clear, are 8 s per
+  hand enough, do the fitted zones feel comfortable (padding/minimums)?

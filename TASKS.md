@@ -70,7 +70,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 ## Phase 6 — Calibration, settings, fallback
 
-- [ ] 6.1 First-run calibration flow (~20s): capture each hand's comfortable range, resize
+- [x] 6.1 First-run calibration flow (~20s): capture each hand's comfortable range, resize
       zones to match.
 - [ ] 6.2 Settings panel: handedness swap, sensitivity sliders (strum threshold, smoothing,
       hex size), persisted in localStorage.

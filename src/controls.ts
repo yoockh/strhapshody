@@ -1,6 +1,6 @@
 /**
  * Sound controls (task 5.3): instrument toggle (on-screen + keyboard),
- * volume, reverb amount.
+ * volume, reverb amount — plus the Calibrate button (task 6.1).
  *
  * A small DOM panel in the bottom-right corner, over the canvas (DOM rather
  * than canvas-drawn so the sliders are real, accessible `<input type=range>`
@@ -54,6 +54,8 @@ export interface ControlsBinding {
   onInstrument(instrument: Instrument): void;
   onVolume(volume: number): void;
   onReverb(amount: number): void;
+  /** Rerun calibration (task 6.1); omit to hide the button. */
+  onCalibrate?: () => void;
 }
 
 /** Handle for keeping the panel in sync when state changes elsewhere. */
@@ -113,6 +115,20 @@ export function mountControls(parent: HTMLElement, binding: ControlsBinding): Co
   };
   slider("Volume", "volume", binding.volume, (v) => binding.onVolume(v));
   slider("Reverb", "reverb", binding.reverb, (v) => binding.onReverb(v));
+
+  if (binding.onCalibrate) {
+    const onCalibrate = binding.onCalibrate;
+    const cal = document.createElement("button");
+    cal.type = "button";
+    cal.className = "calibrate";
+    cal.textContent = "Calibrate";
+    cal.title = "Re-measure your hands' comfortable reach (~20 s, Esc cancels)";
+    cal.addEventListener("click", () => {
+      onCalibrate();
+      cal.blur();
+    });
+    panel.append(cal);
+  }
 
   let current = binding.instrument;
   const render = (): void => {

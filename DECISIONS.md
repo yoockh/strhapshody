@@ -549,3 +549,31 @@ controls are drawn; (c) which keys, given the task-6.4 keyboard fallback will ow
 **Consequences:** settings persistence (localStorage) is task 6.2's job and will cover these too. Changing
 RT60/damping/mix constants is tuning; using a recorded IR or an algorithmic (Freeverb-style) network would
 supersede this.
+
+## ADR-0018: Calibration records robust per-hand ranges in normalised coords and fits zones inside their halves
+
+**Context:** task 6.1 — a ~20 s first-run calibration capturing each hand's comfortable range and resizing
+the zones to match. Questions: (a) the flow and how ranges are measured robustly; (b) how a range becomes
+a zone; (c) persistence and when it runs.
+
+**Decision:**
+1. **Timed flow, one hand at a time:** intro 3 s → left 8 s → right 8 s → done 1.5 s (20.5 s). Recording one
+   hand per phase means the user can focus, and the left phase isn't polluted by strumming motion. The
+   range is the **5th–95th percentile box** of the palm-centre samples (≥ 30 samples, else that hand keeps
+   its previous/default zone), so a stray mis-tracked frame can't inflate a zone. A pure
+   `CalibrationSession` holds the clock + samples; strumming is paused while it runs and the strum
+   detector is reset after (ADR-0007 re-entry hazard).
+2. **Range → zone (`calibratedZones`):** pad 15% per side, grow to a minimum (left: 55% × 60% of its half,
+   strings: 50% × 45%) around the range centre, and clamp inside **its own half** below the status bar.
+   Keeping zones in their halves means role assignment by screen side (ADR handedness/§13) still agrees
+   with where the UI is, and the two zones can never overlap. The left zone feeds the existing
+   strip+hex layout; the right zone gives the strings' y-span (strum detector) and x-span (drawing).
+3. **Stored normalised (0..1, mirrored as seen)** under `strhapshody.calibration.v1` via a guarded
+   localStorage wrapper (`storage.ts`, validates on load), so it survives resizes and bad/old data falls
+   back to defaults. Auto-starts once per page load when nothing is saved and tracking is live; the
+   Calibrate button reruns it; Esc cancels without saving. A hand not seen during a rerun keeps its
+   previous range.
+
+**Consequences:** the zone tints/divider still draw as halves (the zones sit inside them). Changing phase
+lengths, percentiles, padding or minimums is tuning; zones crossing the midline or storing pixels would
+supersede this.

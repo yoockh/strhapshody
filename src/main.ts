@@ -62,6 +62,16 @@ import {
   type AudioEngine,
 } from "./audio.ts";
 import { mountControls } from "./controls.ts";
+import {
+  CALIBRATION_STORAGE_KEY,
+  calibratedZones,
+  CalibrationSession,
+  drawCalibrationOverlay,
+  validateCalibration,
+  type Calibration,
+  type PlayZones,
+} from "./calibration.ts";
+import { browserStorage, loadJSON, saveJSON } from "./storage.ts";
 import { modeLabel, SHAPE_NEUTRAL, strumGestureAction } from "./strumgesture.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
@@ -184,6 +194,50 @@ const POWER_CHORD_OCTAVE = true;
 let soundingKey = "";
 let soundingLabel = NO_CHORD_LABEL;
 
+// Calibration (task 6.1): each hand's comfortable range, persisted, which the
+// play zones are fitted to. Runs automatically on first use (no saved
+// calibration) once hand tracking is live; the Calibrate button reruns it and
+// Esc cancels. Strumming is paused while it runs.
+const storage = browserStorage();
+let calibration: Calibration | null = loadJSON(
+  storage,
+  CALIBRATION_STORAGE_KEY,
+  validateCalibration,
+);
+let calibrationSession: CalibrationSession | null = null;
+// First-run auto-start fires at most once per page load (so Esc sticks).
+let autoCalibrationOffered = calibration !== null;
+
+function startCalibration(): void {
+  if (!webcam || !handTracker) return; // needs live tracking
+  calibrationSession = new CalibrationSession(performance.now() / 1000);
+  autoCalibrationOffered = true;
+}
+
+function endCalibration(save: boolean): void {
+  if (calibrationSession && save) {
+    const result = calibrationSession.result();
+    // A hand that wasn't seen keeps its previous range (or the default).
+    const merged: Calibration = {
+      version: 1,
+      left: result.left ?? calibration?.left ?? null,
+      right: result.right ?? calibration?.right ?? null,
+    };
+    if (merged.left || merged.right) {
+      calibration = merged;
+      saveJSON(storage, CALIBRATION_STORAGE_KEY, merged);
+    }
+  }
+  calibrationSession = null;
+  // The strum detector didn't see the hand while calibrating: re-seed it so
+  // the first frame back can't register as one giant strum (ADR-0007).
+  strumDetector?.reset();
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && calibrationSession) endCalibration(false);
+});
+
 try {
   audioEngine = createAudioEngine();
 } catch (err) {
@@ -201,6 +255,7 @@ if (audioEngine) {
     onInstrument: (i) => engine.setInstrument(i),
     onVolume: (v) => engine.setVolume(v),
     onReverb: (r) => engine.setReverb(r),
+    onCalibrate: () => startCalibration(),
   });
 }
 
@@ -292,22 +347,29 @@ function render(): void {
   const caption = webcam || cameraError ? undefined : "starting camera…";
   drawZoneOverlay(ctx, width, height, caption);
 
-  // Six virtual strings across the right (strum) zone, below the status bar
-  // (PRD §8 / task 2.1). Strum detection against these lines comes in task 2.2.
+  // Play zones (task 6.1): halves below the status bar until calibrated, then
+  // fitted to each hand's recorded comfortable range.
   const barH = statusBarHeight(height);
-  drawStrings(ctx, width / 2, width, barH, height);
+  const zones = calibratedZones(calibration, width, height, barH);
+
+  // First-run calibration starts by itself once hand tracking is live.
+  if (!autoCalibrationOffered && webcam && handTracker) startCalibration();
+
+  // Six virtual strings across the right (strum) zone (PRD §8 / task 2.1).
+  drawStrings(ctx, zones.right.left, zones.right.right, zones.right.top, zones.right.bottom);
 
   // Chord flower in the left zone (task 3.2): draw the 7-cell hex flower, track
   // the left hand's smoothed palm cursor, highlight the hovered cell, and feed
   // the hovered root + finger-count quality into the chord latch as the live
   // pending selection (task 3.4).
-  processChord(ctx, assignments, barH, width, height);
+  processChord(ctx, assignments, zones, width, height);
 
   // Strum detection → audio (task 2.4): feed the right hand's palm y to the
   // WASM strum detector and pluck a string voice for every crossing it reports.
   // Each strum is also the boundary at which the pending chord commits to the
-  // sounding chord (task 3.4), so the chord never changes mid-ring.
-  processStrum(assignments, barH, width, height);
+  // sounding chord (task 3.4), so the chord never changes mid-ring. Paused
+  // while calibrating.
+  if (!calibrationSession) processStrum(assignments, zones, width, height);
 
   // Hand skeleton on top of the tints (mirror baked into the coordinates).
   if (webcam && latestHands && latestHands.landmarks.length > 0) {
@@ -328,12 +390,43 @@ function render(): void {
   // cell is shown by the flower's accent. Instrument follows the audio engine (task 5.3).
   drawStatusBar(ctx, width, height, buildStatusModel(assignments));
 
+  // Calibration overlay + sampling (task 6.1), on top of everything.
+  if (calibrationSession) {
+    const view = calibrationSession.update(
+      performance.now() / 1000,
+      palmNormalized(assignments, "chord", width, height),
+      palmNormalized(assignments, "strum", width, height),
+    );
+    if (view.finished) endCalibration(true);
+    else drawCalibrationOverlay(ctx, width, height, view);
+  }
+
   // Graceful error path: permission denied, no device, camera in use, etc.
   if (cameraError) {
     drawErrorBanner(ctx, width, height, "Camera unavailable", cameraError);
   }
 
   requestAnimationFrame(render);
+}
+
+/**
+ * The palm centre (wrist + middle-MCP mean) of the hand assigned to `role`,
+ * normalised to the canvas (0..1, mirrored as the user sees it), or null if
+ * that hand isn't tracked. Used to record calibration ranges (task 6.1).
+ */
+function palmNormalized(
+  assignments: AssignedHand[],
+  role: HandRole,
+  width: number,
+  height: number,
+): { x: number; y: number } | null {
+  const hand = assignments.find((a) => a.role === role);
+  const lm = hand && latestHands ? latestHands.landmarks[hand.index] : undefined;
+  if (!webcam || !lm || !lm[0] || !lm[9] || width <= 0 || height <= 0) return null;
+  const palm = { x: (lm[0].x + lm[9].x) / 2, y: (lm[0].y + lm[9].y) / 2 };
+  const { videoWidth, videoHeight } = webcam.video;
+  const p = landmarkToCanvas(palm, videoWidth, videoHeight, width, height, true);
+  return { x: p.x / width, y: p.y / height };
 }
 
 /**
@@ -348,14 +441,14 @@ function render(): void {
  */
 function processStrum(
   assignments: AssignedHand[],
-  barH: number,
+  zones: PlayZones,
   width: number,
   height: number,
 ): void {
   if (!engineReady) return;
 
   // (Re)build the detector when the six string-line y positions change.
-  const stringYs = computeStringYs(barH, height);
+  const stringYs = computeStringYs(zones.right.top, zones.right.bottom);
   const sig = stringYs.map((y) => Math.round(y)).join(",");
   if (!strumDetector || sig !== strumGeometry) {
     strumDetector?.free();
@@ -430,7 +523,7 @@ function processStrum(
 function processChord(
   ctx: CanvasRenderingContext2D,
   assignments: AssignedHand[],
-  barH: number,
+  zones: PlayZones,
   width: number,
   height: number,
 ): void {
@@ -438,7 +531,13 @@ function processChord(
 
   // Carve the left zone into a power-strip band (top) and the hex-flower area
   // (below), with a neutral gap between for mode-switch hysteresis (task 4.2).
-  const zone = computeLeftZoneLayout(0, barH, width / 2, height);
+  // The zone itself is the calibrated left zone (task 6.1).
+  const zone = computeLeftZoneLayout(
+    zones.left.left,
+    zones.left.top,
+    zones.left.right,
+    zones.left.bottom,
+  );
 
   // (Re)build the power strip when its rectangle changes, caching the fret
   // marker centres for the renderer.
