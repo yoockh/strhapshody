@@ -522,3 +522,30 @@ and distortion are separate chains; (c) tone control form; (d) keeping loudness 
 setCurveGenerator`; task 5.3 adds the UI toggle and reverb on top. Changing k, the tone range or the
 compensation constant is tuning; a separate clean chain, an asymmetric curve, or moving the curve into TS
 would supersede this.
+
+## ADR-0017: Sound controls — synthetic reverb IR from the engine, DOM control panel, 1/2/3/I shortcuts
+
+**Context:** task 5.3 adds an instrument toggle (on-screen + keyboard), volume, and a simple reverb with an
+amount control. Questions: (a) recorded vs algorithmic reverb, and where it's generated; (b) how the
+controls are drawn; (c) which keys, given the task-6.4 keyboard fallback will own A–G, Shift and Space.
+
+**Decision:**
+1. **ConvolverNode with an IR synthesised by the engine** (`reverb.rs`, `reverbImpulse(sr, rt60, damping,
+   seed)`): 8 ms pre-delay, noise under an e^(−ln1000·t/RT60) envelope, a one-pole lowpass that darkens over
+   the tail, normalised to unit energy; stereo = two seeds (cargo-tested correlation < 0.1). No recorded IR
+   to license or download (ADR-0001/0005). `convolver.normalize = false` because the IR is already
+   unit-energy, so the wet level is predictable. Defaults: RT60 2.2 s, damping 0.6, amount 0.25.
+2. **Mix and volume are pure TS:** `reverbMix(a)` → dry `1−0.3a`, wet `0.8a`; `volumeToGain(v) = 0.55·v²`
+   (perceptual; default 0.8 ≈ the previous fixed 0.35 master). Graph: instrument routes → mix → (dry, and
+   convolver → wet) → master(volume) → destination. IR generator injected after engine init (ADR-0015
+   pattern); before that the wet path is silent.
+3. **DOM panel, not canvas:** real buttons (`aria-pressed`) and `<input type=range>` sliders, bottom-right,
+   so they work with mouse/touch/keyboard and screen readers. Buttons blur after click so Space stays free
+   for strumming.
+4. **Shortcuts `1`/`2`/`3` (Acoustic / Electric Clean / Electric Dist) and `I` (cycle)**; ignored with
+   Ctrl/Meta/Alt and while a slider has focus. Volume/reverb have no shortcuts (sliders only) to keep the
+   key map small next to the 6.4 fallback.
+
+**Consequences:** settings persistence (localStorage) is task 6.2's job and will cover these too. Changing
+RT60/damping/mix constants is tuning; using a recorded IR or an algorithmic (Freeverb-style) network would
+supersede this.

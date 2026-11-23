@@ -30,6 +30,7 @@ import {
   PowerStrip,
   renderPluck,
   distortionCurve,
+  reverbImpulse,
   GestureDetector,
   type GestureDetectorInstance,
   type StrumDetectorInstance,
@@ -53,7 +54,14 @@ import {
 } from "./powerstrip.ts";
 import { NO_CHORD_LABEL } from "./chord.ts";
 import { powerChordLabel, selectVoicing, type PowerSelection } from "./voicing.ts";
-import { createAudioEngine, type AudioEngine } from "./audio.ts";
+import {
+  createAudioEngine,
+  DEFAULT_REVERB,
+  DEFAULT_VOLUME,
+  INSTRUMENT_LABELS,
+  type AudioEngine,
+} from "./audio.ts";
+import { mountControls } from "./controls.ts";
 import { modeLabel, SHAPE_NEUTRAL, strumGestureAction } from "./strumgesture.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
@@ -182,6 +190,20 @@ try {
   console.warn("[strhapshody] audio unavailable:", err);
 }
 
+// Sound controls (task 5.3): instrument toggle (buttons + 1/2/3/I keys),
+// volume and reverb sliders, bottom-right over the canvas.
+if (audioEngine) {
+  const engine = audioEngine;
+  mountControls(document.body, {
+    instrument: engine.instrument,
+    volume: DEFAULT_VOLUME,
+    reverb: DEFAULT_REVERB,
+    onInstrument: (i) => engine.setInstrument(i),
+    onVolume: (v) => engine.setVolume(v),
+    onReverb: (r) => engine.setReverb(r),
+  });
+}
+
 // Resume audio on the first user interaction (pointer or key), once.
 function resumeAudioOnce(): void {
   audioEngine?.resume().catch(() => {});
@@ -200,6 +222,8 @@ initEngine()
     audioEngine?.setPluckRenderer(renderPluck);
     // And the waveshaper curve for the electric/distortion voice (task 5.2).
     audioEngine?.setCurveGenerator(distortionCurve);
+    // And the reverb impulse response (task 5.3).
+    audioEngine?.setImpulseGenerator(reverbImpulse);
   })
   .catch((err: unknown) => {
     console.warn("[strhapshody] engine init failed:", err);
@@ -296,7 +320,7 @@ function render(): void {
 
   // Status bar skeleton (PRD §5). Chord reflects the *sounding* (committed) chord
   // — it only changes on a strum (task 3.4); the hovered-but-not-yet-strummed
-  // cell is shown by the flower's accent. Instrument is a placeholder (Phase 5).
+  // cell is shown by the flower's accent. Instrument follows the audio engine (task 5.3).
   drawStatusBar(ctx, width, height, buildStatusModel(assignments));
 
   // Graceful error path: permission denied, no device, camera in use, etc.
@@ -548,8 +572,8 @@ function processChord(
 /**
  * Build the status-bar model for this frame. Chord reflects the *sounding*
  * voicing — `C`, `Cm`, `C7`, or a power chord like `G5 (fret 3, low E)` — which
- * only changes on a strum (tasks 3.4/4.3). Instrument is a placeholder
- * (Phase 5); tracking health reflects the real pipeline state.
+ * only changes on a strum (tasks 3.4/4.3). Instrument is the audio engine's
+ * current instrument (task 5.3); tracking health reflects the real pipeline.
  */
 function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
   let tracking: string;
@@ -561,7 +585,7 @@ function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
   return {
     chord: soundingLabel,
     mode: modeLabel(playMode, strumShape),
-    instrument: "Acoustic",
+    instrument: audioEngine ? INSTRUMENT_LABELS[audioEngine.instrument] : "no audio",
     tracking,
   };
 }

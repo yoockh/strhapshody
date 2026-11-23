@@ -737,3 +737,22 @@ optionalDependencies and both build and dev server work. If a future esbuild err
 - next: task 5.3 instrument toggle (on-screen + keyboard), volume, reverb amount.
 - needs human verification: whether the distortion *sounds* good (drive 0.6, tone 0.65 defaults) and the
   clean electric reads as "electric" on real speakers.
+
+## 2026-11-23 15:00 WIB — task 5.3 instrument toggle, volume, reverb
+
+- did: new engine module `engine/src/reverb.rs` (`reverbImpulse`: pre-delay + exp-decay noise, darkening
+  lowpass, unit energy; stereo via two seeds) — ADR-0017. `audio.ts`: instrument routes → mix → dry +
+  convolver/wet → master; `setVolume` (`volumeToGain` = 0.55·v²), `setReverb` (`reverbMix`), injected
+  `setImpulseGenerator`. New `src/controls.ts`: DOM panel (3 instrument buttons with `aria-pressed`,
+  volume + reverb range sliders), keyboard `1`/`2`/`3`/`I` via pure `instrumentForKey` /
+  `nextInstrument`. Status-bar INSTRUMENT shows the live instrument. Phase 5 complete.
+- tested: `cargo test` 135 passed (+8 reverb: length, silent pre-delay, unit energy, ~−30 dB at half the
+  RT60, tail darkening with damping (flat without), determinism + L/R decorrelation, sanitisation, wasm =
+  core). `npm run test` 180 passed (+12: controls key map/cycle, volume curve, reverb mix). In-browser
+  (scratch Playwright vs Vite dev server): reverb tail RMS 250 ms after `stopAll` = 0 dry vs 0.041 wet;
+  volume 1 vs 0.5 = 4.1× RMS (squared curve), 0 = silent; real app: key `3` → distortion, `I` → acoustic,
+  click → clean, status bar follows.
+- found: **use-after-free on page unload** — `beforeunload` frees the wasm objects but the rAF loop runs
+  one more frame → "null pointer passed to rust". Pre-existing since 2.4; fixing in the next commit.
+- cosmetic (polish): the controls panel overlaps the right end of the bottom string.
+- needs human verification: reverb character / default amount, slider feel, on real speakers.

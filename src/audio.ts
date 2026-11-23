@@ -15,6 +15,11 @@
  * `setCurveGenerator`; drive 0 = identity = clean) → lowpass tone control →
  * level compensation → master. Electric plucks are brighter and sustain longer.
  *
+ * After the instrument routes, a reverb send (task 5.3, ADR-0017) —
+ * `ConvolverNode` with an impulse response synthesised by the Rust `reverb`
+ * module (injected via `setImpulseGenerator`) — mixes wet/dry by
+ * `reverbMix(amount)`, and the master gain follows `volumeToGain(volume)`.
+ *
  * ADR-0002 split: the pure, camera/DOM-free logic — strum velocity → gain
  * (`velocityToGain`) and the per-note Karplus-Strong parameters
  * (`acousticPluckParams`: ring time by pitch, brightness by velocity, palm-mute
@@ -201,6 +206,43 @@ export const DEFAULT_TONE = 0.65;
  */
 export type CurveGenerator = (samples: number, drive: number) => Float32Array;
 
+/** Master gain at full volume. Default volume 0.8 → 0.35 (the old fixed level). */
+export const MAX_MASTER_GAIN = 0.55;
+export const DEFAULT_VOLUME = 0.8;
+export const DEFAULT_REVERB = 0.25;
+
+/**
+ * Volume slider `[0, 1]` → master gain, squared so the slider feels
+ * perceptually even (loudness is roughly logarithmic in amplitude). 0 is
+ * silence. Clamped; non-finite → the default volume.
+ */
+export function volumeToGain(volume: number): number {
+  const v = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : DEFAULT_VOLUME;
+  return MAX_MASTER_GAIN * v * v;
+}
+
+/**
+ * Reverb amount `[0, 1]` → dry/wet gains. Dry eases down a little as wet comes
+ * up so turning the reverb up doesn't just make everything louder; 0 is fully
+ * dry. With the engine's unit-energy impulse response (ADR-0017) the wet level
+ * is predictable. Clamped; non-finite → the default amount.
+ */
+export function reverbMix(amount: number): { dry: number; wet: number } {
+  const a = Number.isFinite(amount) ? Math.min(1, Math.max(0, amount)) : DEFAULT_REVERB;
+  return { dry: 1 - 0.3 * a, wet: 0.8 * a };
+}
+
+/**
+ * Builds one reverb impulse-response channel (the engine's `reverbImpulse`):
+ * sample rate, RT60 seconds, damping [0,1], seed → `Float32Array`.
+ */
+export type ImpulseGenerator = (
+  sampleRate: number,
+  duration: number,
+  damping: number,
+  seed: number,
+) => Float32Array;
+
 /** A single live plucked-string voice (source + its gain). */
 interface Voice {
   readonly source: AudioScheduledSourceNode;
@@ -252,6 +294,15 @@ export interface AudioEngine {
    * has no curve (passes audio through), so electric sounds clean.
    */
   setCurveGenerator(generate: CurveGenerator | null): void;
+  /** Master volume `[0, 1]`. */
+  setVolume(volume: number): void;
+  /** Reverb amount `[0, 1]` (0 = dry). */
+  setReverb(amount: number): void;
+  /**
+   * Install the reverb impulse-response generator. Until one is installed the
+   * convolver has no buffer (the wet path is silent).
+   */
+  setImpulseGenerator(generate: ImpulseGenerator | null): void;
   /** Release the audio context and all voices. Idempotent. */
   close(): void;
 }
@@ -259,13 +310,15 @@ export interface AudioEngine {
 /** Envelope constants for the placeholder (pre-wasm) oscillator pluck. */
 const ATTACK_S = 0.004;
 const DECAY_S = 1.4;
-const MASTER_GAIN = 0.35;
 /** Level into the shaper: keeps six summed voices mostly inside [-1, 1]. */
 const SHAPER_IN_GAIN = 0.3;
 /** Waveshaper table length (odd → an exact entry at 0). */
 const CURVE_SAMPLES = 2049;
 /** Crossfade time constant when switching instruments, seconds. */
 const ROUTE_TC_S = 0.01;
+/** Reverb impulse response: RT60 seconds and tail damping. */
+const REVERB_RT60_S = 2.2;
+const REVERB_DAMPING = 0.6;
 
 /**
  * Create the Web Audio engine. Constructs a (suspended) `AudioContext`; nothing
@@ -282,10 +335,31 @@ export function createAudioEngine(): AudioEngine {
 
   const ctx = new Ctor();
 
-  // Master bus → speakers.
+  // Master bus → speakers. Everything upstream lands in `mix`, which splits
+  // into a dry path and a reverb send (convolver → wet), both into master.
   const master = ctx.createGain();
-  master.gain.value = MASTER_GAIN;
+  let volume = DEFAULT_VOLUME;
+  master.gain.value = volumeToGain(volume);
   master.connect(ctx.destination);
+  const mix = ctx.createGain();
+  const dry = ctx.createGain();
+  const convolver = ctx.createConvolver();
+  convolver.normalize = false; // the engine's IR is already unit-energy
+  const wet = ctx.createGain();
+  mix.connect(dry).connect(master);
+  mix.connect(convolver).connect(wet).connect(master);
+  let reverbAmount = DEFAULT_REVERB;
+  const applyReverbMix = (immediate = false): void => {
+    const { dry: d, wet: w } = reverbMix(reverbAmount);
+    if (immediate) {
+      dry.gain.value = d;
+      wet.gain.value = w;
+    } else {
+      dry.gain.setTargetAtTime(d, ctx.currentTime, ROUTE_TC_S);
+      wet.gain.setTargetAtTime(w, ctx.currentTime, ROUTE_TC_S);
+    }
+  };
+  applyReverbMix(true);
 
   // Voices → bus, which feeds two routes (only one open at a time):
   //   acoustic: bus → acousticSend → master
@@ -299,8 +373,8 @@ export function createAudioEngine(): AudioEngine {
   tone.type = "lowpass";
   tone.Q.value = 0.7;
   const electricOut = ctx.createGain();
-  bus.connect(acousticSend).connect(master);
-  bus.connect(electricSend).connect(shaper).connect(tone).connect(electricOut).connect(master);
+  bus.connect(acousticSend).connect(mix);
+  bus.connect(electricSend).connect(shaper).connect(tone).connect(electricOut).connect(mix);
 
   let instrument: Instrument = "acoustic";
   let drive = DEFAULT_DRIVE;
@@ -499,6 +573,38 @@ export function createAudioEngine(): AudioEngine {
       if (!Number.isFinite(value)) return;
       toneValue = Math.min(1, Math.max(0, value));
       if (!closed) applyRouting();
+    },
+
+    setVolume(value: number): void {
+      if (!Number.isFinite(value) || closed) return;
+      volume = Math.min(1, Math.max(0, value));
+      master.gain.setTargetAtTime(volumeToGain(volume), ctx.currentTime, ROUTE_TC_S);
+    },
+
+    setReverb(value: number): void {
+      if (!Number.isFinite(value) || closed) return;
+      reverbAmount = Math.min(1, Math.max(0, value));
+      applyReverbMix();
+    },
+
+    setImpulseGenerator(generate: ImpulseGenerator | null): void {
+      if (closed) return;
+      if (!generate) {
+        convolver.buffer = null;
+        return;
+      }
+      try {
+        const left = generate(ctx.sampleRate, REVERB_RT60_S, REVERB_DAMPING, 1);
+        const right = generate(ctx.sampleRate, REVERB_RT60_S, REVERB_DAMPING, 2);
+        const n = Math.min(left.length, right.length);
+        if (n === 0) return;
+        const ir = ctx.createBuffer(2, n, ctx.sampleRate);
+        ir.getChannelData(0).set(left.subarray(0, n));
+        ir.getChannelData(1).set(right.subarray(0, n));
+        convolver.buffer = ir;
+      } catch {
+        convolver.buffer = null;
+      }
     },
 
     setCurveGenerator(generate: CurveGenerator | null): void {

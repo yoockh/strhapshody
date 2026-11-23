@@ -65,7 +65,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       choice — no sample licensing, genuinely testable by inspecting the output buffer).
 - [x] 5.2 Electric clean + distortion voice: Web Audio `WaveShaperNode` driven by a Rust/WASM
       curve generator with a drive parameter, plus a basic tone control (lowpass/shelf).
-- [ ] 5.3 Instrument toggle (on-screen + keyboard shortcut), volume control, simple reverb
+- [x] 5.3 Instrument toggle (on-screen + keyboard shortcut), volume control, simple reverb
       (ConvolverNode or algorithmic) amount control.
 
 ## Phase 6 — Calibration, settings, fallback

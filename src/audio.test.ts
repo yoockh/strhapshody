@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   acousticPluckParams,
+  DEFAULT_VOLUME,
   driveCompensation,
+  MAX_MASTER_GAIN,
+  reverbMix,
+  volumeToGain,
   INSTRUMENT_LABELS,
   INSTRUMENTS,
   pluckParams,
@@ -188,5 +192,40 @@ describe("driveCompensation", () => {
     expect(driveCompensation(-1)).toBe(1);
     expect(driveCompensation(5)).toBeCloseTo(1 / 13, 10);
     expect(driveCompensation(Number.NaN)).toBe(1);
+  });
+});
+
+describe("volumeToGain", () => {
+  it("0 is silent, 1 is the max master gain", () => {
+    expect(volumeToGain(0)).toBe(0);
+    expect(volumeToGain(1)).toBeCloseTo(MAX_MASTER_GAIN, 10);
+  });
+  it("is squared (perceptual) and the default keeps the old 0.35 level", () => {
+    expect(volumeToGain(0.5)).toBeCloseTo(MAX_MASTER_GAIN / 4, 10);
+    expect(volumeToGain(DEFAULT_VOLUME)).toBeCloseTo(0.352, 3);
+  });
+  it("clamps and is NaN-safe", () => {
+    expect(volumeToGain(-1)).toBe(0);
+    expect(volumeToGain(3)).toBeCloseTo(MAX_MASTER_GAIN, 10);
+    expect(volumeToGain(Number.NaN)).toBeCloseTo(volumeToGain(DEFAULT_VOLUME), 10);
+  });
+});
+
+describe("reverbMix", () => {
+  it("0 is fully dry", () => {
+    expect(reverbMix(0)).toEqual({ dry: 1, wet: 0 });
+  });
+  it("wet rises and dry eases down as the amount goes up", () => {
+    const a = reverbMix(0.3);
+    const b = reverbMix(0.8);
+    expect(b.wet).toBeGreaterThan(a.wet);
+    expect(b.dry).toBeLessThan(a.dry);
+    expect(reverbMix(1).dry).toBeGreaterThan(0.5);
+  });
+  it("clamps and is NaN-safe", () => {
+    expect(reverbMix(-2)).toEqual(reverbMix(0));
+    expect(reverbMix(5)).toEqual(reverbMix(1));
+    const n = reverbMix(Number.NaN);
+    expect(Number.isFinite(n.dry) && Number.isFinite(n.wet)).toBe(true);
   });
 });
