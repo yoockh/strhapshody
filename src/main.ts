@@ -247,7 +247,12 @@ startWebcam()
     console.warn("[strhapshody] camera unavailable:", err);
   });
 
+// Set on page teardown: the wasm objects are freed then, so the render loop
+// must not run another frame against them ("null pointer passed to rust").
+let disposed = false;
+
 function render(): void {
+  if (disposed) return;
   const { ctx, width, height } = stage;
   ctx.clearRect(0, 0, width, height);
 
@@ -616,8 +621,11 @@ function applySoundingVoicing(): void {
 
 requestAnimationFrame(render);
 
-// Release the camera when the page goes away.
+// Release the camera when the page goes away. Stop the render loop *first*:
+// a frame scheduled after the frees below would call into freed wasm objects.
 window.addEventListener("beforeunload", () => {
+  disposed = true;
+  engineReady = false;
   webcam?.stop();
   handTracker?.close();
   audioEngine?.close();

@@ -756,3 +756,13 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   one more frame → "null pointer passed to rust". Pre-existing since 2.4; fixing in the next commit.
 - cosmetic (polish): the controls panel overlaps the right end of the bottom string.
 - needs human verification: reverb character / default amount, slider feel, on real speakers.
+
+## 2026-11-23 15:05 WIB — fix: render loop used freed wasm objects on unload
+
+- did: `beforeunload` freed every wasm object while the rAF render loop could still run one more frame →
+  "null pointer passed to rust" page error (reproduced by dispatching `beforeunload` in headless
+  Chromium). `main.ts` now sets a `disposed` flag (and `engineReady = false`) *before* the frees and
+  `render()` returns immediately once disposed.
+- tested: the scratch repro script now reports no page errors after `beforeunload`; typecheck 0,
+  `npm run test` 180 passed. Regression coverage: add a "dispatch beforeunload → no page error" case to
+  the Playwright suite in task 7.1 (it needs a real browser + wasm, so it can't live in vitest).
