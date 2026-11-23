@@ -842,3 +842,19 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   page errors. Phase 6 complete.
 - next: Phase 7 — 7.1 Playwright e2e (C–G–Am–F via keyboard, assert audio), 7.2 latency harness,
   7.3 README.
+
+## 2026-11-23 17:30 WIB — task 7.1 Playwright end-to-end suite
+
+- did: (ADR-0022) `@playwright/test@1.63.0` (matches the preinstalled browser). `playwright.config.ts`
+  (production build + `vite preview` webServer, Chromium with fake media device/UI and a fake video
+  file), `e2e/fake-video.ts` (generates a 160×120×30 Y4M into the temp dir), `e2e/app.spec.ts` (6
+  tests). Audio engine observability: `stats` (voices started, last voice time), `outputLevel()`
+  (AnalyserNode RMS on master), `currentChord()`, `clock()`; read-only `window.__strhapshody.state()`
+  hook in `main.ts`. `npm run test:e2e` = build engine + playwright. TESTING.md updated.
+- tested: `npm run test:e2e` → 6 passed (8 s): camera live from the fake file + engine ready; C–G–Am–F
+  — each strum sets the label, loads 5/6/5/6 sounding strings with the right lowest note (C3/G2/A2/F2),
+  starts exactly that many voices and puts signal on the master (RMS > 0.005); chord change waits for
+  the strum; upstroke on acoustic/clean/distortion (6 voices + signal each); left-handed setting survives
+  reload; unload regression. **Mutation check:** reverting the unload fix makes that test fail with
+  "null pointer passed to rust". `npm run test` 253, `cargo test` 140, typecheck 0.
+- next: 7.2 latency harness, 7.3 README.

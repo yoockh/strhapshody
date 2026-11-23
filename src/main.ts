@@ -899,6 +899,35 @@ function applySoundingVoicing(): void {
   soundingLabel = voicing.label;
 }
 
+/**
+ * Read-only debug/test hook (task 7.1): a snapshot of the app state for the
+ * Playwright suite and for poking at the app from the devtools console. It
+ * exposes no way to change anything.
+ */
+declare global {
+  interface Window {
+    __strhapshody?: { state(): Record<string, unknown> };
+  }
+}
+window.__strhapshody = {
+  state: () => ({
+    engineReady,
+    camera: cameraError ? "error" : webcam ? "live" : "starting",
+    tracker: handTracker !== null,
+    sounding: soundingLabel,
+    mode: playMode,
+    instrument: audioEngine?.instrument ?? null,
+    audioRunning: audioEngine?.running ?? false,
+    voicesStarted: audioEngine?.stats.voicesStarted ?? 0,
+    lastVoiceTime: audioEngine?.stats.lastVoiceTime ?? 0,
+    level: audioEngine?.outputLevel() ?? 0,
+    chord: audioEngine?.currentChord() ?? [],
+    clock: audioEngine?.clock() ?? null,
+    calibrating: calibrationSession !== null,
+    leftHanded: settings.leftHanded,
+  }),
+};
+
 requestAnimationFrame(render);
 
 // Release the camera when the page goes away. Stop the render loop *first*:

@@ -21,15 +21,23 @@ camera data (there is no camera in this execution environment). Cover:
 
 ```
 npm run test        # vitest, unit tests for TS glue code (non-engine logic, UI state)
-npm run test:e2e     # playwright, see below
+npm run test:e2e    # playwright end-to-end, see below
 ```
 
-Playwright end-to-end (Phase 7.1) is the closest thing to "real" testing available without a
-human: launch Chromium with `--use-fake-device-for-media-stream` and a fake video file as the
-"camera", drive the **keyboard fallback** (Phase 6.4) rather than trying to fake MediaPipe hand
-landmarks convincingly, and assert on Web Audio behavior (e.g. via a recording/analysis node)
-that chord changes and strums actually produced sound. This validates the full UI/audio wiring
-even though it can't validate real hand-tracking accuracy.
+Playwright end-to-end (`e2e/`, task 7.1) is the closest thing to "real" testing available
+without a human. `npm run test:e2e` builds the engine, then Playwright builds the app and serves it
+with `vite preview`, launches Chromium with `--use-fake-device-for-media-stream` and
+`--use-file-for-fake-video-capture` (a small Y4M clip generated on the fly by `e2e/fake-video.ts`,
+not committed), and drives the **keyboard fallback** (task 6.4) rather than trying to fake MediaPipe
+hand landmarks. Assertions read the read-only `window.__strhapshody.state()` hook: the sounding
+chord label, the loaded note set, how many voices actually started, and the RMS level of the master
+output (an `AnalyserNode` tap) — so "it made sound" is measured, not assumed. Covered: camera +
+engine start, the C–G–Am–F progression (label, note count, lowest note, voices, level), the
+chord-changes-only-on-strum rule, upstroke on all three instruments, settings persistence across a
+reload, and the unload use-after-free regression.
+
+First run on a new machine: `npx playwright install chromium` (downloads the browser Playwright
+drives). Traces are off by default; rerun a failing test with `--trace on` to debug it.
 
 ## What can't be tested without a human
 

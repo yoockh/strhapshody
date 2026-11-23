@@ -81,7 +81,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 ## Phase 7 — Testing & polish pass
 
-- [ ] 7.1 Playwright end-to-end test: launch with `--use-fake-device-for-media-stream` and a
+- [x] 7.1 Playwright end-to-end test: launch with `--use-fake-device-for-media-stream` and a
       fake video file, drive the keyboard-fallback path through a C–G–Am–F progression, assert
       audio context produced sound events for each chord.
 - [ ] 7.2 Latency measurement harness: timestamp strum-event detection vs. audio start, log

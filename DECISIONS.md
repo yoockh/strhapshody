@@ -651,3 +651,28 @@ doubles as a debug/demo mode without a camera and as the e2e driver for 7.1.
 
 **Consequences:** the keyboard path is the deterministic way to exercise chord → voicing → audio without
 a camera (task 7.1). A dominant-7th key or a sticky minor mode would be additions, not a contract change.
+
+## ADR-0022: E2E asserts measured audio through a read-only state hook; fake camera from a generated Y4M
+
+**Context:** task 7.1 — Playwright with a fake media device and a fake video file, driving the keyboard
+fallback through C–G–Am–F and asserting that the audio context produced sound for each chord.
+
+**Decision:**
+1. **Observability, not mocks:** the audio engine exposes `stats.voicesStarted`, `outputLevel()` (RMS
+   from an `AnalyserNode` tapped off the master bus — it doesn't alter the sound), `currentChord()` and
+   `clock()`. `main.ts` publishes a read-only `window.__strhapshody.state()` snapshot (sounding label,
+   mode, instrument, note set, voices, level, camera/engine status). Tests assert the right *number* of
+   voices started for each voicing and that the master output actually carries signal — real Web Audio,
+   real WASM, nothing stubbed. The hook can't change state, so shipping it is harmless and handy in
+   devtools.
+2. **Production build under test:** Playwright's `webServer` runs `npm run build && vite preview`;
+   `npm run test:e2e` builds the engine first. Chromium gets `--use-fake-device-for-media-stream`,
+   `--use-fake-ui-for-media-stream` and `--use-file-for-fake-video-capture` pointing at a 160×120×30
+   Y4M clip generated into the OS temp dir by `e2e/fake-video.ts` (no binary in git).
+3. **Versions:** `@playwright/test` pinned to the environment's preinstalled Playwright (1.63.0) so the
+   bundled Chromium matches; on a fresh machine `npx playwright install chromium` once. Traces off.
+4. The unload use-after-free fix (2026-11-23) has its regression test here (verified to fail with the
+   fix reverted).
+
+**Consequences:** hand-tracking accuracy and feel remain untestable here (TESTING.md); new UI/audio
+features should add an e2e case driven through the keyboard or the hook rather than mocks.

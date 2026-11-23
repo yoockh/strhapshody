@@ -305,6 +305,17 @@ export interface AudioEngine {
    * convolver has no buffer (the wet path is silent).
    */
   setImpulseGenerator(generate: ImpulseGenerator | null): void;
+  /**
+   * Observability for tests / the latency harness (task 7.1/7.2): how many
+   * voices have actually been started, and when the last one was scheduled.
+   */
+  readonly stats: { readonly voicesStarted: number; readonly lastVoiceTime: number };
+  /** RMS of the master output over the last ~46 ms (an AnalyserNode tap). */
+  outputLevel(): number;
+  /** The note set currently loaded (Hz per string, 0 = silent string). */
+  currentChord(): readonly number[];
+  /** The underlying AudioContext's current time and output latency (seconds). */
+  clock(): { readonly currentTime: number; readonly outputLatency: number; readonly baseLatency: number };
   /** Release the audio context and all voices. Idempotent. */
   close(): void;
 }
@@ -343,6 +354,13 @@ export function createAudioEngine(): AudioEngine {
   let volume = DEFAULT_VOLUME;
   master.gain.value = volumeToGain(volume);
   master.connect(ctx.destination);
+  // Level meter tap (observability only; doesn't affect the sound).
+  const meter = ctx.createAnalyser();
+  meter.fftSize = 2048;
+  master.connect(meter);
+  const meterBuf = new Float32Array(meter.fftSize);
+  let voicesStarted = 0;
+  let lastVoiceTime = 0;
   const mix = ctx.createGain();
   const dry = ctx.createGain();
   const convolver = ctx.createConvolver();
@@ -544,6 +562,8 @@ export function createAudioEngine(): AudioEngine {
         ?? oscillatorSource(freq, muted, peak, gain, now);
 
       gain.connect(bus);
+      voicesStarted++;
+      lastVoiceTime = now;
       const voice: Voice = { source, gain };
       voices[index] = voice;
       source.onended = () => {
@@ -575,6 +595,30 @@ export function createAudioEngine(): AudioEngine {
       if (!Number.isFinite(value)) return;
       toneValue = Math.min(1, Math.max(0, value));
       if (!closed) applyRouting();
+    },
+
+    get stats() {
+      return { voicesStarted, lastVoiceTime };
+    },
+
+    outputLevel(): number {
+      if (closed) return 0;
+      meter.getFloatTimeDomainData(meterBuf);
+      let sum = 0;
+      for (let i = 0; i < meterBuf.length; i++) sum += meterBuf[i]! * meterBuf[i]!;
+      return Math.sqrt(sum / meterBuf.length);
+    },
+
+    currentChord(): readonly number[] {
+      return chord.slice();
+    },
+
+    clock() {
+      return {
+        currentTime: ctx.currentTime,
+        outputLatency: (ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0,
+        baseLatency: ctx.baseLatency ?? 0,
+      };
     },
 
     setVolume(value: number): void {
