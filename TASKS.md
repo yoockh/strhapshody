@@ -72,7 +72,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 - [x] 6.1 First-run calibration flow (~20s): capture each hand's comfortable range, resize
       zones to match.
-- [ ] 6.2 Settings panel: handedness swap, sensitivity sliders (strum threshold, smoothing,
+- [x] 6.2 Settings panel: handedness swap, sensitivity sliders (strum threshold, smoothing,
       hex size), persisted in localStorage.
 - [ ] 6.3 Lighting-too-dark / hand-out-of-frame warning banners driven by MediaPipe tracking
       confidence + frame presence.

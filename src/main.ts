@@ -54,19 +54,23 @@ import {
 } from "./powerstrip.ts";
 import { NO_CHORD_LABEL } from "./chord.ts";
 import { powerChordLabel, selectVoicing, type PowerSelection } from "./voicing.ts";
+import { createAudioEngine, INSTRUMENT_LABELS, type AudioEngine } from "./audio.ts";
 import {
-  createAudioEngine,
-  DEFAULT_REVERB,
-  DEFAULT_VOLUME,
-  INSTRUMENT_LABELS,
-  type AudioEngine,
-} from "./audio.ts";
+  DEFAULT_SETTINGS,
+  hexScale,
+  SETTINGS_STORAGE_KEY,
+  smoothingMinCutoff,
+  strumMinVelocity,
+  validateSettings,
+  type Settings,
+} from "./settings.ts";
 import { mountControls } from "./controls.ts";
 import {
   CALIBRATION_STORAGE_KEY,
   calibratedZones,
   CalibrationSession,
   drawCalibrationOverlay,
+  mirrorBox,
   validateCalibration,
   type Calibration,
   type PlayZones,
@@ -152,7 +156,6 @@ let cursorFilterY: OneEuroFilterInstance | null = null;
 // gentle baseline smoothing (min cutoff) that opens up with speed (beta), in the
 // seconds-timestamp convention of ADR-0006.
 const HEX_HYSTERESIS_FRACTION = 0.18;
-const CURSOR_MIN_CUTOFF = 1.5;
 const CURSOR_BETA = 0.01;
 const CURSOR_D_CUTOFF = 1.0;
 
@@ -183,9 +186,6 @@ const POWER_STRIP_MAX_FRET = 12;
 // held too) so a strum there still sounds the last power chord. Like the hex
 // chord it only *sounds* on the next strum boundary (see processStrum).
 let pendingPower: PowerSelection | null = null;
-// Whether power chords add the octave as a third string (PRD §7 "optionally";
-// on by default for a fuller sound — exposed as a setting in Phase 6.2).
-const POWER_CHORD_OCTAVE = true;
 
 // The voicing currently loaded in the audio engine (task 4.3): its identity key
 // (so a strum only reloads the engine when the voicing actually changes, e.g.
@@ -199,6 +199,11 @@ let soundingLabel = NO_CHORD_LABEL;
 // calibration) once hand tracking is live; the Calibrate button reruns it and
 // Esc cancels. Strumming is paused while it runs.
 const storage = browserStorage();
+
+// User settings (task 6.2): handedness, sensitivity, sound — persisted.
+let settings: Settings =
+  loadJSON(storage, SETTINGS_STORAGE_KEY, validateSettings) ?? DEFAULT_SETTINGS;
+
 let calibration: Calibration | null = loadJSON(
   storage,
   CALIBRATION_STORAGE_KEY,
@@ -216,14 +221,18 @@ function startCalibration(): void {
 
 function endCalibration(save: boolean): void {
   if (calibrationSession && save) {
-    const result = calibrationSession.result();
-    // A hand that wasn't seen keeps its previous range (or the default).
+    const result = calibrationSession.result(settings.leftHanded);
+    // A hand that wasn't seen keeps its previous range (or the default),
+    // mirrored first if it was recorded with the other handedness.
+    const flip = (calibration?.leftHanded ?? false) !== settings.leftHanded;
+    const prev = (b: Calibration["chord"] | undefined) => (b && flip ? mirrorBox(b) : b ?? null);
     const merged: Calibration = {
       version: 1,
-      left: result.left ?? calibration?.left ?? null,
-      right: result.right ?? calibration?.right ?? null,
+      chord: result.chord ?? prev(calibration?.chord),
+      strum: result.strum ?? prev(calibration?.strum),
+      leftHanded: settings.leftHanded,
     };
-    if (merged.left || merged.right) {
+    if (merged.chord || merged.strum) {
       calibration = merged;
       saveJSON(storage, CALIBRATION_STORAGE_KEY, merged);
     }
@@ -244,20 +253,45 @@ try {
   console.warn("[strhapshody] audio unavailable:", err);
 }
 
-// Sound controls (task 5.3): instrument toggle (buttons + 1/2/3/I keys),
-// volume and reverb sliders, bottom-right over the canvas.
-if (audioEngine) {
-  const engine = audioEngine;
-  mountControls(document.body, {
-    instrument: engine.instrument,
-    volume: DEFAULT_VOLUME,
-    reverb: DEFAULT_REVERB,
-    onInstrument: (i) => engine.setInstrument(i),
-    onVolume: (v) => engine.setVolume(v),
-    onReverb: (r) => engine.setReverb(r),
-    onCalibrate: () => startCalibration(),
-  });
+/**
+ * Apply a settings change (task 6.2) and persist it. Sound settings go to the
+ * audio engine; smoothing rebuilds the cursor filters; a handedness change
+ * swaps the zones, so every per-hand detector is re-seeded. Strum threshold
+ * and hex size are read each frame.
+ */
+function applySettings(patch: Partial<Settings>): void {
+  const prev = settings;
+  settings = { ...settings, ...patch };
+  saveJSON(storage, SETTINGS_STORAGE_KEY, settings);
+  audioEngine?.setInstrument(settings.instrument);
+  audioEngine?.setVolume(settings.volume);
+  audioEngine?.setReverb(settings.reverb);
+  if (settings.smoothing !== prev.smoothing) {
+    cursorFilterX?.free();
+    cursorFilterY?.free();
+    cursorFilterX = null;
+    cursorFilterY = null;
+  }
+  if (settings.leftHanded !== prev.leftHanded) {
+    strumDetector?.reset();
+    hexMap?.reset();
+    cursorFilterX?.reset();
+    cursorFilterY?.reset();
+    fingerCount?.reset();
+    gestureDetector?.reset();
+    strumShape = SHAPE_NEUTRAL;
+  }
 }
+// Push the loaded sound settings into the engine.
+applySettings({});
+
+// Control panel (tasks 5.3 / 6.1 / 6.2): instrument (buttons + 1/2/3/I keys),
+// volume, reverb, Calibrate, and the Settings section.
+mountControls(document.body, {
+  settings,
+  onChange: applySettings,
+  onCalibrate: () => startCalibration(),
+});
 
 // Resume audio on the first user interaction (pointer or key), once.
 function resumeAudioOnce(): void {
@@ -331,7 +365,9 @@ function render(): void {
         console.warn("[strhapshody] hand detection error:", err);
       }
       if (latestHands && latestHands.landmarks.length > 0) {
-        assignments = assignHands(toRawHands(latestHands));
+        assignments = assignHands(toRawHands(latestHands), {
+          leftHanded: settings.leftHanded,
+        });
       }
     }
   } else {
@@ -341,22 +377,22 @@ function render(): void {
   // Un-mirrored overlay. Zone tint + active-zone highlight first (behind the
   // divider, labels, and skeleton), driven by the live assignments.
   const activeRoles = new Set<HandRole>(assignments.map((a) => a.role));
-  drawZoneSplit(ctx, width, height, activeRoles);
+  drawZoneSplit(ctx, width, height, activeRoles, 0, settings.leftHanded);
 
   // Centre divider, zone labels, and (while starting) a status caption.
   const caption = webcam || cameraError ? undefined : "starting camera…";
-  drawZoneOverlay(ctx, width, height, caption);
+  drawZoneOverlay(ctx, width, height, caption, settings.leftHanded);
 
   // Play zones (task 6.1): halves below the status bar until calibrated, then
   // fitted to each hand's recorded comfortable range.
   const barH = statusBarHeight(height);
-  const zones = calibratedZones(calibration, width, height, barH);
+  const zones = calibratedZones(calibration, width, height, barH, settings.leftHanded);
 
   // First-run calibration starts by itself once hand tracking is live.
   if (!autoCalibrationOffered && webcam && handTracker) startCalibration();
 
   // Six virtual strings across the right (strum) zone (PRD §8 / task 2.1).
-  drawStrings(ctx, zones.right.left, zones.right.right, zones.right.top, zones.right.bottom);
+  drawStrings(ctx, zones.strum.left, zones.strum.right, zones.strum.top, zones.strum.bottom);
 
   // Chord flower in the left zone (task 3.2): draw the 7-cell hex flower, track
   // the left hand's smoothed palm cursor, highlight the hovered cell, and feed
@@ -398,7 +434,7 @@ function render(): void {
       palmNormalized(assignments, "strum", width, height),
     );
     if (view.finished) endCalibration(true);
-    else drawCalibrationOverlay(ctx, width, height, view);
+    else drawCalibrationOverlay(ctx, width, height, view, settings.leftHanded);
   }
 
   // Graceful error path: permission denied, no device, camera in use, etc.
@@ -448,13 +484,15 @@ function processStrum(
   if (!engineReady) return;
 
   // (Re)build the detector when the six string-line y positions change.
-  const stringYs = computeStringYs(zones.right.top, zones.right.bottom);
+  const stringYs = computeStringYs(zones.strum.top, zones.strum.bottom);
   const sig = stringYs.map((y) => Math.round(y)).join(",");
   if (!strumDetector || sig !== strumGeometry) {
     strumDetector?.free();
     strumDetector = new StrumDetector(new Float64Array(stringYs));
     strumGeometry = sig;
   }
+  // Strum threshold (task 6.2): ignore crossings slower than this.
+  strumDetector.setMinVelocity(strumMinVelocity(settings.strumThreshold, height));
 
   const strumHand = assignments.find((a) => a.role === "strum");
   const lm =
@@ -533,10 +571,10 @@ function processChord(
   // (below), with a neutral gap between for mode-switch hysteresis (task 4.2).
   // The zone itself is the calibrated left zone (task 6.1).
   const zone = computeLeftZoneLayout(
-    zones.left.left,
-    zones.left.top,
-    zones.left.right,
-    zones.left.bottom,
+    zones.chord.left,
+    zones.chord.top,
+    zones.chord.right,
+    zones.chord.bottom,
   );
 
   // (Re)build the power strip when its rectangle changes, caching the fret
@@ -566,24 +604,22 @@ function processChord(
     zone.hexArea.right,
     zone.hexArea.bottom,
   );
-  const sig = `${Math.round(layout.cx)},${Math.round(layout.cy)},${Math.round(
-    layout.radius,
-  )}`;
+  // Hex size setting (task 6.2) scales the largest flower that fits.
+  const radius = layout.radius * hexScale(settings.hexSize);
+  const sig = `${Math.round(layout.cx)},${Math.round(layout.cy)},${Math.round(radius)}`;
   if (!hexMap || sig !== hexGeometry) {
     hexMap?.free();
-    hexMap = new HexMap(
-      layout.cx,
-      layout.cy,
-      layout.radius,
-      layout.radius * HEX_HYSTERESIS_FRACTION,
-    );
+    hexMap = new HexMap(layout.cx, layout.cy, radius, radius * HEX_HYSTERESIS_FRACTION);
     hexGeometry = sig;
   }
+  // Smoothing setting (task 6.2) sets the cursor filters' min cutoff; they're
+  // nulled on change and rebuilt here.
+  const minCutoff = smoothingMinCutoff(settings.smoothing);
   if (!cursorFilterX) {
-    cursorFilterX = new OneEuroFilter(CURSOR_MIN_CUTOFF, CURSOR_BETA, CURSOR_D_CUTOFF);
+    cursorFilterX = new OneEuroFilter(minCutoff, CURSOR_BETA, CURSOR_D_CUTOFF);
   }
   if (!cursorFilterY) {
-    cursorFilterY = new OneEuroFilter(CURSOR_MIN_CUTOFF, CURSOR_BETA, CURSOR_D_CUTOFF);
+    cursorFilterY = new OneEuroFilter(minCutoff, CURSOR_BETA, CURSOR_D_CUTOFF);
   }
   if (!fingerCount) {
     fingerCount = new FingerCountDetector(FINGER_COUNT_HOLD_FRAMES);
@@ -710,7 +746,7 @@ function applySoundingVoicing(): void {
     playMode,
     pendingPower,
     { root: letter, quality: chordLatch.committedQuality },
-    POWER_CHORD_OCTAVE,
+    settings.powerOctave,
   );
   if (!voicing || voicing.key === soundingKey) return;
   audioEngine?.setChord(voicing.frequencies);

@@ -73,27 +73,31 @@ export function drawZoneSplit(
   height: number,
   activeRoles: ReadonlySet<HandRole>,
   statusBarHeight = 0,
+  leftHanded = false,
 ): void {
   const midX = width / 2;
   const top = statusBarHeight;
   const h = height - statusBarHeight;
+  // Chord half is the left one, or the right one for left-handed players.
+  const chordX = leftHanded ? midX : 0;
+  const strumX = leftHanded ? 0 : midX;
 
-  // Base tints: a cool wash on the chord (left) half, a warm wash on the strum
-  // (right) half, so the two zones read as distinct regions.
+  // Base tints: a cool wash on the chord half, a warm wash on the strum half,
+  // so the two zones read as distinct regions.
   ctx.fillStyle = "rgba(80, 120, 170, 0.08)";
-  ctx.fillRect(0, top, midX, h);
+  ctx.fillRect(chordX, top, midX, h);
   ctx.fillStyle = "rgba(170, 120, 70, 0.08)";
-  ctx.fillRect(midX, top, width - midX, h);
+  ctx.fillRect(strumX, top, midX, h);
 
   // Active-zone highlight: a thin accent border inset into whichever half has a
   // tracked hand right now.
   ctx.lineWidth = 3;
   ctx.strokeStyle = ACCENT;
   if (activeRoles.has("chord")) {
-    ctx.strokeRect(3, top + 3, midX - 6, h - 6);
+    ctx.strokeRect(chordX + 3, top + 3, midX - 6, h - 6);
   }
   if (activeRoles.has("strum")) {
-    ctx.strokeRect(midX + 3, top + 3, width - midX - 6, h - 6);
+    ctx.strokeRect(strumX + 3, top + 3, midX - 6, h - 6);
   }
 }
 

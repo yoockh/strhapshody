@@ -87,6 +87,9 @@ pub struct StrumCore {
     last_y: f64,
     last_time: f64,
     has_last: bool,
+    /// Crossings on a step slower than this (px/s) are not reported — the
+    /// user-tunable "strum threshold" (task 6.2). 0 = report every crossing.
+    min_velocity: f64,
 }
 
 /// Nominal frame period (seconds) used for velocity when a real one can't be
@@ -105,7 +108,25 @@ impl StrumCore {
             last_y: 0.0,
             last_time: 0.0,
             has_last: false,
+            min_velocity: 0.0,
         }
+    }
+
+    /// Set the strum threshold: steps slower than `min_velocity` px/s produce
+    /// no events (a slow drift across a line doesn't pluck it). The reference
+    /// point still advances on such steps, so a line passed slowly is simply
+    /// skipped — it never fires late. Non-finite or negative → 0 (off).
+    pub fn set_min_velocity(&mut self, min_velocity: f64) {
+        self.min_velocity = if min_velocity.is_finite() && min_velocity > 0.0 {
+            min_velocity
+        } else {
+            0.0
+        };
+    }
+
+    /// The current strum threshold in px/s.
+    pub fn min_velocity(&self) -> f64 {
+        self.min_velocity
     }
 
     /// Feed the next hand-point sample `(y, timestamp)` (y in px, timestamp in
@@ -149,6 +170,10 @@ impl StrumCore {
             NOMINAL_PERIOD
         };
         let velocity = ((y - prev_y).abs() / dt).abs();
+        if velocity < self.min_velocity {
+            // Too slow to count as a strum (state already advanced above).
+            return Vec::new();
+        }
 
         let direction = if y > prev_y {
             StrumDirection::Down
@@ -224,6 +249,18 @@ impl StrumDetector {
     /// See [`StrumCore::reset`].
     pub fn reset(&mut self) {
         self.inner.reset();
+    }
+
+    /// See [`StrumCore::set_min_velocity`] (px/s; 0 = off).
+    #[wasm_bindgen(js_name = setMinVelocity)]
+    pub fn set_min_velocity(&mut self, min_velocity: f64) {
+        self.inner.set_min_velocity(min_velocity);
+    }
+
+    /// See [`StrumCore::min_velocity`].
+    #[wasm_bindgen(getter, js_name = minVelocity)]
+    pub fn min_velocity(&self) -> f64 {
+        self.inner.min_velocity()
     }
 }
 
@@ -412,5 +449,59 @@ mod tests {
         let mut d = StrumCore::new(&[]);
         d.push(0.0, 0.0);
         assert!(d.push(1000.0, 0.1).is_empty());
+    }
+
+    // --- strum threshold (task 6.2) -------------------------------------
+
+    #[test]
+    fn threshold_off_by_default() {
+        let d = StrumCore::new(&strings());
+        assert_eq!(d.min_velocity(), 0.0);
+    }
+
+    #[test]
+    fn slow_crossing_below_threshold_is_ignored_fast_one_fires() {
+        let s = strings();
+        let mut d = StrumCore::new(&s);
+        d.set_min_velocity(500.0);
+        // 10 px in 0.1 s = 100 px/s across the first line: ignored.
+        d.push(s[0] - 5.0, 0.0);
+        assert!(d.push(s[0] + 5.0, 0.1).is_empty());
+        // A fast pass over the next line (6000 px/s) fires.
+        let ev = d.push(s[1] + 5.0, 0.1 + (s[1] - s[0]) / 6000.0);
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].string_index, 1);
+    }
+
+    #[test]
+    fn slowly_passed_line_never_fires_late() {
+        let s = strings();
+        let mut d = StrumCore::new(&s);
+        d.set_min_velocity(500.0);
+        d.push(s[0] - 5.0, 0.0);
+        d.push(s[0] + 5.0, 0.1); // slow pass over line 0 (ignored)
+        // Now move fast but without reaching line 1: nothing (line 0 is behind us).
+        assert!(d.push(s[0] + 10.0, 0.101).is_empty());
+    }
+
+    #[test]
+    fn threshold_sanitised() {
+        let mut d = StrumCore::new(&strings());
+        d.set_min_velocity(f64::NAN);
+        assert_eq!(d.min_velocity(), 0.0);
+        d.set_min_velocity(-3.0);
+        assert_eq!(d.min_velocity(), 0.0);
+        d.set_min_velocity(250.0);
+        assert_eq!(d.min_velocity(), 250.0);
+    }
+
+    #[test]
+    fn threshold_exactly_equal_still_fires() {
+        let s = strings();
+        let mut d = StrumCore::new(&s);
+        d.set_min_velocity(1000.0);
+        d.push(s[0] - 5.0, 0.0);
+        let ev = d.push(s[0] + 5.0, 0.01); // 10 px / 0.01 s = 1000 px/s
+        assert_eq!(ev.len(), 1);
     }
 }

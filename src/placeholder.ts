@@ -16,6 +16,8 @@
  *    message box for the graceful "no camera / permission denied" path.
  */
 
+import { statusBarHeight } from "./hud.ts";
+
 const BAR_COLORS = [
   "#3a4a5a",
   "#44566a",
@@ -57,6 +59,7 @@ export function drawZoneOverlay(
   width: number,
   height: number,
   caption?: string,
+  leftHanded = false,
 ): void {
   const midX = width / 2;
 
@@ -70,13 +73,19 @@ export function drawZoneOverlay(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Zone labels (PRD §5: left hand = chords, right hand = strum).
-  ctx.fillStyle = "rgba(232, 234, 237, 0.85)";
+  // Zone labels (PRD §5: left hand = chords, right hand = strum; swapped for
+  // left-handed players). Small, just under the status bar, so they never sit
+  // on top of the hex flower or the strings.
+  ctx.fillStyle = "rgba(232, 234, 237, 0.6)";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `600 ${Math.round(height * 0.035)}px system-ui, sans-serif`;
-  ctx.fillText("LEFT HAND · chords", midX / 2, height * 0.5);
-  ctx.fillText("RIGHT HAND · strum", midX + midX / 2, height * 0.5);
+  ctx.font = `600 ${Math.max(10, Math.round(height * 0.02))}px system-ui, sans-serif`;
+  const labelY = statusBarHeight(height) + Math.max(10, height * 0.025);
+  const [leftLabel, rightLabel] = leftHanded
+    ? ["LEFT HAND · strum", "RIGHT HAND · chords"]
+    : ["LEFT HAND · chords", "RIGHT HAND · strum"];
+  ctx.fillText(leftLabel, midX / 2, labelY);
+  ctx.fillText(rightLabel, midX + midX / 2, labelY);
 
   // Optional status caption (e.g. "starting camera…"). Omitted once the live
   // feed is showing, so we don't label a real camera frame as a placeholder.

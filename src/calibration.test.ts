@@ -4,6 +4,8 @@ import {
   CalibrationSession,
   MIN_SAMPLES,
   PHASE_SECONDS,
+  calibrationPrompt,
+  mirrorBox,
   robustRange,
   validateCalibration,
   type Calibration,
@@ -57,10 +59,10 @@ describe("CalibrationSession", () => {
   it("walks intro → left → right → done → finished on schedule", () => {
     const s = new CalibrationSession(100);
     expect(s.update(100, L, R).phase).toBe("intro");
-    expect(s.update(100 + PHASE_SECONDS.intro + 0.1, L, R).phase).toBe("left");
-    const tRight = 100 + PHASE_SECONDS.intro + PHASE_SECONDS.left + 0.1;
-    expect(s.update(tRight, L, R).phase).toBe("right");
-    const tDone = tRight + PHASE_SECONDS.right;
+    expect(s.update(100 + PHASE_SECONDS.intro + 0.1, L, R).phase).toBe("chord");
+    const tRight = 100 + PHASE_SECONDS.intro + PHASE_SECONDS.chord + 0.1;
+    expect(s.update(tRight, L, R).phase).toBe("strum");
+    const tDone = tRight + PHASE_SECONDS.strum;
     expect(s.update(tDone, L, R).phase).toBe("done");
     const end = s.update(tDone + PHASE_SECONDS.done, L, R);
     expect(end.finished).toBe(true);
@@ -77,11 +79,11 @@ describe("CalibrationSession", () => {
     const s = new CalibrationSession(0);
     const fps = 30;
     for (let f = 0; f < 21 * fps; f++) s.update(f / fps, L, R);
-    const { left, right } = s.sampleCounts;
-    expect(left).toBeGreaterThan(PHASE_SECONDS.left * fps - 3);
-    expect(left).toBeLessThan(PHASE_SECONDS.left * fps + 3);
-    expect(right).toBeGreaterThan(PHASE_SECONDS.right * fps - 3);
-    expect(right).toBeLessThan(PHASE_SECONDS.right * fps + 3);
+    const { chord, strum } = s.sampleCounts;
+    expect(chord).toBeGreaterThan(PHASE_SECONDS.chord * fps - 3);
+    expect(chord).toBeLessThan(PHASE_SECONDS.chord * fps + 3);
+    expect(strum).toBeGreaterThan(PHASE_SECONDS.strum * fps - 3);
+    expect(strum).toBeLessThan(PHASE_SECONDS.strum * fps + 3);
   });
 
   it("produces each hand's range; a missing hand stays null", () => {
@@ -92,9 +94,11 @@ describe("CalibrationSession", () => {
       s.update(f / 30, leftPts[i++ % leftPts.length]!, null);
     }
     const c = s.result();
-    expect(c.left).not.toBeNull();
-    expect(c.left!.left).toBeCloseTo(0.1, 1);
-    expect(c.right).toBeNull();
+    expect(c.chord).not.toBeNull();
+    expect(c.chord!.left).toBeCloseTo(0.1, 1);
+    expect(c.strum).toBeNull();
+    expect(c.leftHanded).toBe(false);
+    expect(s.result(true).leftHanded).toBe(true);
   });
 
   it("reports progress and a countdown, and a live box once sampling", () => {
@@ -105,7 +109,7 @@ describe("CalibrationSession", () => {
     const pts = grid(0.1, 0.3, 0.3, 0.6, 4);
     let v = v0;
     for (let k = 0; k < 16; k++) v = s.update(PHASE_SECONDS.intro + k / 30, pts[k]!, null);
-    expect(v.phase).toBe("left");
+    expect(v.phase).toBe("chord");
     expect(v.progress).toBeGreaterThan(0);
     expect(v.progress).toBeLessThan(0.1);
     expect(v.liveBox).not.toBeNull();
@@ -120,8 +124,9 @@ describe("CalibrationSession", () => {
 describe("validateCalibration", () => {
   const good: Calibration = {
     version: 1,
-    left: { left: 0.1, top: 0.3, right: 0.4, bottom: 0.9 },
-    right: null,
+    chord: { left: 0.1, top: 0.3, right: 0.4, bottom: 0.9 },
+    strum: null,
+    leftHanded: false,
   };
   it("accepts a good calibration (one hand may be null)", () => {
     expect(validateCalibration(JSON.parse(JSON.stringify(good)))).toEqual(good);
@@ -130,91 +135,148 @@ describe("validateCalibration", () => {
     expect(validateCalibration(null)).toBeNull();
     expect(validateCalibration("x")).toBeNull();
     expect(validateCalibration({ ...good, version: 2 })).toBeNull();
-    expect(validateCalibration({ ...good, left: { left: 0.5, top: 0.3, right: 0.4, bottom: 0.9 } })).toBeNull();
-    expect(validateCalibration({ ...good, left: { left: 0.1, top: 0.3, right: 1.4, bottom: 0.9 } })).toBeNull();
-    expect(validateCalibration({ ...good, left: { left: "0.1" } })).toBeNull();
-    expect(validateCalibration({ version: 1, left: null, right: null })).toBeNull();
+    expect(validateCalibration({ ...good, chord: { left: 0.5, top: 0.3, right: 0.4, bottom: 0.9 } })).toBeNull();
+    expect(validateCalibration({ ...good, chord: { left: 0.1, top: 0.3, right: 1.4, bottom: 0.9 } })).toBeNull();
+    expect(validateCalibration({ ...good, chord: { left: "0.1" } })).toBeNull();
+    expect(validateCalibration({ version: 1, chord: null, strum: null })).toBeNull();
+    expect(validateCalibration({ ...good, leftHanded: "yes" })).toBeNull();
+  });
+  it("treats a missing leftHanded flag as right-handed", () => {
+    const { leftHanded: _omit, ...rest } = good;
+    expect(validateCalibration(rest)!.leftHanded).toBe(false);
   });
 });
 
 describe("calibratedZones", () => {
   it("without calibration each zone is its half below the status bar", () => {
     const z = calibratedZones(null, W, H, BAR);
-    expect(z.left).toEqual({ left: 0, top: BAR, right: W / 2, bottom: H });
-    expect(z.right).toEqual({ left: W / 2, top: BAR, right: W, bottom: H });
+    expect(z.chord).toEqual({ left: 0, top: BAR, right: W / 2, bottom: H });
+    expect(z.strum).toEqual({ left: W / 2, top: BAR, right: W, bottom: H });
   });
 
   it("fits zones to the recorded ranges, with padding", () => {
     const z = calibratedZones(
       {
         version: 1,
-        left: { left: 0.05, top: 0.3, right: 0.4, bottom: 0.95 },
-        right: { left: 0.6, top: 0.25, right: 0.95, bottom: 0.85 },
+        chord: { left: 0.05, top: 0.3, right: 0.4, bottom: 0.95 },
+        strum: { left: 0.6, top: 0.25, right: 0.95, bottom: 0.85 },
       },
       W,
       H,
       BAR,
     );
     // contains the raw range
-    expect(z.left.left).toBeLessThanOrEqual(0.05 * W);
-    expect(z.left.right).toBeGreaterThanOrEqual(0.4 * W);
-    expect(z.right.top).toBeLessThanOrEqual(0.25 * H);
-    expect(z.right.bottom).toBeGreaterThanOrEqual(0.85 * H);
+    expect(z.chord.left).toBeLessThanOrEqual(0.05 * W);
+    expect(z.chord.right).toBeGreaterThanOrEqual(0.4 * W);
+    expect(z.strum.top).toBeLessThanOrEqual(0.25 * H);
+    expect(z.strum.bottom).toBeGreaterThanOrEqual(0.85 * H);
     // but is smaller than the full half
-    expect(z.right.bottom - z.right.top).toBeLessThan(H - BAR);
+    expect(z.strum.bottom - z.strum.top).toBeLessThan(H - BAR);
   });
 
   it("keeps each zone inside its half and below the bar", () => {
     const z = calibratedZones(
       {
         version: 1,
-        left: { left: 0.3, top: 0.0, right: 0.7, bottom: 0.3 }, // strays right & under the bar
-        right: { left: 0.4, top: 0.7, right: 1.0, bottom: 1.0 },
+        chord: { left: 0.3, top: 0.0, right: 0.7, bottom: 0.3 }, // strays right & under the bar
+        strum: { left: 0.4, top: 0.7, right: 1.0, bottom: 1.0 },
       },
       W,
       H,
       BAR,
     );
-    expect(z.left.left).toBeGreaterThanOrEqual(0);
-    expect(z.left.right).toBeLessThanOrEqual(W / 2);
-    expect(z.left.top).toBeGreaterThanOrEqual(BAR);
-    expect(z.right.left).toBeGreaterThanOrEqual(W / 2);
-    expect(z.right.right).toBeLessThanOrEqual(W);
-    expect(z.right.bottom).toBeLessThanOrEqual(H);
+    expect(z.chord.left).toBeGreaterThanOrEqual(0);
+    expect(z.chord.right).toBeLessThanOrEqual(W / 2);
+    expect(z.chord.top).toBeGreaterThanOrEqual(BAR);
+    expect(z.strum.left).toBeGreaterThanOrEqual(W / 2);
+    expect(z.strum.right).toBeLessThanOrEqual(W);
+    expect(z.strum.bottom).toBeLessThanOrEqual(H);
   });
 
   it("grows a tiny range to a playable minimum", () => {
     const z = calibratedZones(
       {
         version: 1,
-        left: { left: 0.2, top: 0.5, right: 0.21, bottom: 0.51 },
-        right: { left: 0.7, top: 0.5, right: 0.71, bottom: 0.51 },
+        chord: { left: 0.2, top: 0.5, right: 0.21, bottom: 0.51 },
+        strum: { left: 0.7, top: 0.5, right: 0.71, bottom: 0.51 },
       },
       W,
       H,
       BAR,
     );
-    expect(z.left.right - z.left.left).toBeGreaterThanOrEqual((W / 2) * 0.55 - 1e-6);
-    expect(z.left.bottom - z.left.top).toBeGreaterThanOrEqual((H - BAR) * 0.6 - 1e-6);
-    expect(z.right.bottom - z.right.top).toBeGreaterThanOrEqual((H - BAR) * 0.45 - 1e-6);
+    expect(z.chord.right - z.chord.left).toBeGreaterThanOrEqual((W / 2) * 0.55 - 1e-6);
+    expect(z.chord.bottom - z.chord.top).toBeGreaterThanOrEqual((H - BAR) * 0.6 - 1e-6);
+    expect(z.strum.bottom - z.strum.top).toBeGreaterThanOrEqual((H - BAR) * 0.45 - 1e-6);
   });
 
   it("uses the default half for a hand with no range", () => {
     const z = calibratedZones(
-      { version: 1, left: null, right: { left: 0.6, top: 0.3, right: 0.9, bottom: 0.7 } },
+      { version: 1, chord: null, strum: { left: 0.6, top: 0.3, right: 0.9, bottom: 0.7 } },
       W,
       H,
       BAR,
     );
-    expect(z.left).toEqual({ left: 0, top: BAR, right: W / 2, bottom: H });
+    expect(z.chord).toEqual({ left: 0, top: BAR, right: W / 2, bottom: H });
   });
 
   it("survives degenerate canvas sizes", () => {
     const z = calibratedZones(null, 0, Number.NaN, Number.NaN);
-    for (const r of [z.left, z.right]) {
+    for (const r of [z.chord, z.strum]) {
       for (const v of [r.left, r.top, r.right, r.bottom]) expect(Number.isFinite(v)).toBe(true);
       expect(r.right).toBeGreaterThanOrEqual(r.left);
       expect(r.bottom).toBeGreaterThanOrEqual(r.top);
     }
+  });
+});
+
+describe("left-handed zones (task 6.2)", () => {
+  const calib: Calibration = {
+    version: 1,
+    chord: { left: 0.05, top: 0.3, right: 0.4, bottom: 0.95 },
+    strum: { left: 0.6, top: 0.25, right: 0.95, bottom: 0.85 },
+    leftHanded: false,
+  };
+
+  it("uncalibrated: chord zone on the right half, strings on the left", () => {
+    const z = calibratedZones(null, W, H, BAR, true);
+    expect(z.chord).toEqual({ left: W / 2, top: BAR, right: W, bottom: H });
+    expect(z.strum).toEqual({ left: 0, top: BAR, right: W / 2, bottom: H });
+  });
+
+  it("a right-handed calibration is mirrored when switching to left-handed", () => {
+    const z = calibratedZones(calib, W, H, BAR, true);
+    const rh = calibratedZones(calib, W, H, BAR, false);
+    expect(z.chord.left).toBeCloseTo(W - rh.chord.right, 6);
+    expect(z.chord.right).toBeCloseTo(W - rh.chord.left, 6);
+    expect(z.chord.top).toBeCloseTo(rh.chord.top, 6);
+    expect(z.strum.left).toBeCloseTo(W - rh.strum.right, 6);
+  });
+
+  it("a left-handed calibration is used as recorded when left-handed", () => {
+    const lh: Calibration = {
+      version: 1,
+      chord: mirrorBox(calib.chord!),
+      strum: mirrorBox(calib.strum!),
+      leftHanded: true,
+    };
+    expect(calibratedZones(lh, W, H, BAR, true)).toEqual(calibratedZones(calib, W, H, BAR, true));
+  });
+
+  it("mirrorBox flips x only and is an involution", () => {
+    const b = { left: 0.1, top: 0.2, right: 0.3, bottom: 0.4 };
+    const m = mirrorBox(b);
+    expect(m.left).toBeCloseTo(0.7, 10);
+    expect(m.right).toBeCloseTo(0.9, 10);
+    expect(m.top).toBe(0.2);
+    const back = mirrorBox(m);
+    expect(back.left).toBeCloseTo(b.left, 10);
+    expect(back.right).toBeCloseTo(b.right, 10);
+  });
+
+  it("prompts name the right hands", () => {
+    expect(calibrationPrompt("chord")[1]).toContain("left hand");
+    expect(calibrationPrompt("chord", true)[1]).toContain("right hand");
+    expect(calibrationPrompt("strum", true)[0]).toBe("Left hand");
+    expect(calibrationPrompt("intro", true)[1]).toContain("right for chords");
   });
 });

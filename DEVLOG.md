@@ -788,3 +788,23 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   can't start in headless tests.
 - needs human verification: do the full 20 s flow with real hands — are the prompts clear, are 8 s per
   hand enough, do the fitted zones feel comfortable (padding/minimums)?
+
+## 2026-11-23 16:10 WIB — task 6.2 settings panel (handedness, sensitivity, persistence)
+
+- did: (ADR-0019) new pure `src/settings.ts` (Settings type/defaults, field-wise `validateSettings`,
+  `strumMinVelocity`, `smoothingMinCutoff`, `hexScale`). Engine: `StrumCore::set_min_velocity` /
+  `StrumDetector.setMinVelocity` (strum threshold). `handedness.ts`: `leftHanded` option +
+  `LEFT_HANDED_ROLE`. `calibration.ts`: boxes renamed `chord`/`strum` (+ phases), `leftHanded` recorded,
+  `mirrorBox`, handedness-aware `calibratedZones` and `calibrationPrompt`. `hud.ts` / `placeholder.ts`:
+  tints and zone labels follow handedness; labels moved to just under the status bar (fixes the noted
+  overlap with the hex flower). `controls.ts` rewritten around `Settings` + `onChange(patch)`: collapsible
+  Settings section (left-handed, power octave, strum threshold, smoothing, hex size, reset); panel docks
+  on the strum side. `main.ts` loads/saves settings and applies them (audio, filters rebuilt on smoothing
+  change, detectors re-seeded on handedness change, threshold + hex scale per frame, power octave).
+- tested: `cargo test` 140 passed (+5 strum threshold: off by default, slow ignored / fast fires, slow
+  line never fires late, sanitised, equal-to-threshold fires). `npm run test` 225 passed (+22: settings
+  validation/mappings, left-handed assignment, left-handed zones/mirroring/prompts). typecheck 0, build
+  clean. Browser: Settings opens; left-handed swaps strings/flower/labels and moves the panel left; hex
+  size 0 shrinks the flower; settings JSON saved and restored after reload; no page errors.
+- needs human verification: default strum threshold (does it kill accidental plucks without eating soft
+  strums?), smoothing range feel, left-handed play with real hands.

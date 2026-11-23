@@ -45,6 +45,12 @@ export const DEFAULT_HANDEDNESS_ROLE: Readonly<Record<Handedness, HandRole>> = {
   Left: "strum",
 };
 
+/** `DEFAULT_HANDEDNESS_ROLE` with the roles swapped, for left-handed players. */
+export const LEFT_HANDED_ROLE: Readonly<Record<Handedness, HandRole>> = {
+  Right: "strum",
+  Left: "chord",
+};
+
 /** One detected hand's inputs to the assignment. */
 export interface RawHand {
   readonly handedness: Handedness;
@@ -74,6 +80,13 @@ export interface AssignOptions {
   readonly mirror?: boolean;
   /** Override the user-hand → role mapping (see DEFAULT_HANDEDNESS_ROLE). */
   readonly roleMap?: Readonly<Record<Handedness, HandRole>>;
+  /**
+   * Left-handed player (settings, task 6.2): the user's RIGHT hand picks
+   * chords and the LEFT hand strums, so the default role map is swapped and the
+   * screen-side fallback puts chords on the right half. An explicit `roleMap`
+   * still wins for the label mapping.
+   */
+  readonly leftHanded?: boolean;
 }
 
 /**
@@ -115,7 +128,11 @@ export function assignHands(
 ): AssignedHand[] {
   const minScore = opts.minScore ?? 0.6;
   const mirror = opts.mirror ?? true;
-  const roleMap = opts.roleMap ?? DEFAULT_HANDEDNESS_ROLE;
+  const leftHanded = opts.leftHanded ?? false;
+  const roleMap =
+    opts.roleMap ?? (leftHanded ? LEFT_HANDED_ROLE : DEFAULT_HANDEDNESS_ROLE);
+  // Screen-side fallback: which side's hand gets the chord role.
+  const chordOnLeft = !leftHanded;
 
   if (hands.length === 0) return [];
 
@@ -126,7 +143,7 @@ export function assignHands(
     const confident = h.score >= minScore;
     const role: HandRole = confident
       ? roleMap[h.handedness]
-      : screenX[0]! < 0.5
+      : (screenX[0]! < 0.5) === chordOnLeft
         ? "chord"
         : "strum";
     return [
@@ -157,9 +174,10 @@ export function assignHands(
     bRole = roleB;
     source = "handedness";
   } else {
-    // Screen-side backup: leftmost hand → chord, the other → strum.
+    // Screen-side backup: leftmost hand → chord, the other → strum (mirrored
+    // for left-handed players).
     source = "screen-side";
-    if (screenX[0]! <= screenX[1]!) {
+    if ((screenX[0]! <= screenX[1]!) === chordOnLeft) {
       aRole = "chord";
       bRole = "strum";
     } else {

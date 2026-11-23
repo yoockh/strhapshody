@@ -1,10 +1,13 @@
 /**
- * Sound controls (task 5.3): instrument toggle (on-screen + keyboard),
- * volume, reverb amount — plus the Calibrate button (task 6.1).
+ * Control panel: sound controls (task 5.3: instrument toggle on-screen + by
+ * keyboard, volume, reverb), the Calibrate button (6.1), and a collapsible
+ * Settings section (6.2: left-handed swap, power-chord octave, strum
+ * threshold, smoothing, hex size, reset).
  *
  * A small DOM panel in the bottom-right corner, over the canvas (DOM rather
- * than canvas-drawn so the sliders are real, accessible `<input type=range>`
- * elements that work with mouse, touch and keyboard). Keyboard shortcuts:
+ * than canvas-drawn so the controls are real, accessible buttons, checkboxes
+ * and `<input type=range>` sliders). Every change is reported as a partial
+ * `Settings` patch; `main.ts` applies and persists it. Keyboard shortcuts:
  * `1` / `2` / `3` pick Acoustic / Electric Clean / Electric Dist, `I` cycles.
  * They avoid the keyboard-fallback keys of task 6.4 (A–G, Shift, Space).
  *
@@ -13,6 +16,7 @@
  */
 
 import { INSTRUMENT_LABELS, INSTRUMENTS, type Instrument } from "./audio.ts";
+import { DEFAULT_SETTINGS, type Settings } from "./settings.ts";
 
 /** The instrument after `current` in toggle order (wraps around). */
 export function nextInstrument(current: Instrument): Instrument {
@@ -46,21 +50,20 @@ export function instrumentForKey(
   }
 }
 
-/** Callbacks + initial values the panel is wired to. */
+/** What the panel is wired to. */
 export interface ControlsBinding {
-  readonly instrument: Instrument;
-  readonly volume: number;
-  readonly reverb: number;
-  onInstrument(instrument: Instrument): void;
-  onVolume(volume: number): void;
-  onReverb(amount: number): void;
+  /** Initial values. */
+  readonly settings: Settings;
+  /** A setting changed (only the changed fields). */
+  onChange(patch: Partial<Settings>): void;
   /** Rerun calibration (task 6.1); omit to hide the button. */
   onCalibrate?: () => void;
 }
 
 /** Handle for keeping the panel in sync when state changes elsewhere. */
 export interface ControlsHandle {
-  setInstrument(instrument: Instrument): void;
+  /** Re-sync every control to `settings` (e.g. after a reset). */
+  update(settings: Settings): void;
   destroy(): void;
 }
 
@@ -70,12 +73,23 @@ const SHORTCUT_HINT: Readonly<Record<Instrument, string>> = {
   distortion: "3",
 };
 
+type UnitKey = "volume" | "reverb" | "strumThreshold" | "smoothing" | "hexSize";
+type BoolKey = "leftHanded" | "powerOctave";
+
 /** Build the panel into `parent` and install the keyboard shortcuts. */
 export function mountControls(parent: HTMLElement, binding: ControlsBinding): ControlsHandle {
+  let current: Settings = binding.settings;
+  const change = (patch: Partial<Settings>): void => {
+    current = { ...current, ...patch };
+    binding.onChange(patch);
+    sync();
+  };
+
   const panel = document.createElement("section");
   panel.id = "controls";
-  panel.setAttribute("aria-label", "Sound controls");
+  panel.setAttribute("aria-label", "Controls");
 
+  // Instrument buttons.
   const group = document.createElement("div");
   group.className = "instrument-group";
   group.setAttribute("role", "group");
@@ -88,7 +102,7 @@ export function mountControls(parent: HTMLElement, binding: ControlsBinding): Co
     b.textContent = INSTRUMENT_LABELS[inst];
     b.title = `${INSTRUMENT_LABELS[inst]} (${SHORTCUT_HINT[inst]})`;
     b.addEventListener("click", () => {
-      select(inst);
+      selectInstrument(inst);
       b.blur(); // keep Space for strumming, not re-clicking
     });
     buttons.set(inst, b);
@@ -96,26 +110,52 @@ export function mountControls(parent: HTMLElement, binding: ControlsBinding): Co
   }
   panel.append(group);
 
-  const slider = (label: string, id: string, value: number, onInput: (v: number) => void) => {
+  const sliders = new Map<UnitKey, HTMLInputElement>();
+  const slider = (container: HTMLElement, label: string, key: UnitKey, hint?: string): void => {
     const row = document.createElement("label");
     row.className = "slider-row";
-    row.htmlFor = id;
+    row.htmlFor = `setting-${key}`;
     const text = document.createElement("span");
     text.textContent = label;
     const input = document.createElement("input");
     input.type = "range";
-    input.id = id;
+    input.id = `setting-${key}`;
     input.min = "0";
     input.max = "1";
     input.step = "0.01";
-    input.value = String(value);
-    input.addEventListener("input", () => onInput(Number(input.value)));
+    input.value = String(current[key]);
+    if (hint) input.title = hint;
+    input.addEventListener("input", () => change({ [key]: Number(input.value) }));
     row.append(text, input);
-    panel.append(row);
+    container.append(row);
+    sliders.set(key, input);
   };
-  slider("Volume", "volume", binding.volume, (v) => binding.onVolume(v));
-  slider("Reverb", "reverb", binding.reverb, (v) => binding.onReverb(v));
 
+  const checks = new Map<BoolKey, HTMLInputElement>();
+  const checkbox = (container: HTMLElement, label: string, key: BoolKey): void => {
+    const row = document.createElement("label");
+    row.className = "check-row";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = `setting-${key}`;
+    input.checked = current[key];
+    input.addEventListener("change", () => {
+      change({ [key]: input.checked });
+      input.blur();
+    });
+    const text = document.createElement("span");
+    text.textContent = label;
+    row.append(input, text);
+    container.append(row);
+    checks.set(key, input);
+  };
+
+  slider(panel, "Volume", "volume");
+  slider(panel, "Reverb", "reverb");
+
+  // Calibrate + Settings toggle.
+  const actions = document.createElement("div");
+  actions.className = "action-row";
   if (binding.onCalibrate) {
     const onCalibrate = binding.onCalibrate;
     const cal = document.createElement("button");
@@ -127,37 +167,73 @@ export function mountControls(parent: HTMLElement, binding: ControlsBinding): Co
       onCalibrate();
       cal.blur();
     });
-    panel.append(cal);
+    actions.append(cal);
   }
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "settings-toggle";
+  toggle.textContent = "Settings";
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-controls", "settings-section");
+  actions.append(toggle);
+  panel.append(actions);
 
-  let current = binding.instrument;
-  const render = (): void => {
-    for (const [inst, b] of buttons) b.setAttribute("aria-pressed", String(inst === current));
-  };
-  function select(inst: Instrument): void {
-    current = inst;
-    render();
-    binding.onInstrument(inst);
+  // Collapsible settings section.
+  const section = document.createElement("div");
+  section.id = "settings-section";
+  section.hidden = true;
+  checkbox(section, "Left-handed (chords with right hand)", "leftHanded");
+  checkbox(section, "Power chords: add octave", "powerOctave");
+  slider(section, "Strum threshold", "strumThreshold", "Higher ignores slower hand movement");
+  slider(section, "Smoothing", "smoothing", "Higher = steadier chord cursor, more lag");
+  slider(section, "Hex size", "hexSize");
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "reset";
+  reset.textContent = "Reset to defaults";
+  reset.addEventListener("click", () => {
+    change({ ...DEFAULT_SETTINGS });
+    reset.blur();
+  });
+  section.append(reset);
+  panel.append(section);
+  toggle.addEventListener("click", () => {
+    section.hidden = !section.hidden;
+    toggle.setAttribute("aria-expanded", String(!section.hidden));
+    toggle.blur();
+  });
+
+  function sync(): void {
+    // Keep the panel on the strum side so it never covers the chord flower.
+    panel.classList.toggle("strum-left", current.leftHanded);
+    for (const [inst, b] of buttons) {
+      b.setAttribute("aria-pressed", String(inst === current.instrument));
+    }
+    for (const [key, input] of sliders) input.value = String(current[key]);
+    for (const [key, input] of checks) input.checked = current[key];
   }
-  render();
+  function selectInstrument(inst: Instrument): void {
+    change({ instrument: inst });
+  }
+  sync();
 
   const onKey = (e: KeyboardEvent): void => {
     if (e.repeat) return;
-    if (e.target instanceof HTMLInputElement) return; // slider has focus
-    const inst = instrumentForKey(e.key, current, {
+    if (e.target instanceof HTMLInputElement) return; // a control has focus
+    const inst = instrumentForKey(e.key, current.instrument, {
       ctrl: e.ctrlKey,
       meta: e.metaKey,
       alt: e.altKey,
     });
-    if (inst) select(inst);
+    if (inst) selectInstrument(inst);
   };
   window.addEventListener("keydown", onKey);
   parent.append(panel);
 
   return {
-    setInstrument(inst: Instrument): void {
-      current = inst;
-      render();
+    update(settings: Settings): void {
+      current = settings;
+      sync();
     },
     destroy(): void {
       window.removeEventListener("keydown", onKey);

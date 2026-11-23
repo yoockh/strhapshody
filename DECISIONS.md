@@ -577,3 +577,32 @@ a zone; (c) persistence and when it runs.
 **Consequences:** the zone tints/divider still draw as halves (the zones sit inside them). Changing phase
 lengths, percentiles, padding or minimums is tuning; zones crossing the midline or storing pixels would
 supersede this.
+
+## ADR-0019: Settings — knob positions persisted, mapped to engine units in pure TS; left-handed mirrors the whole layout
+
+**Context:** task 6.2 — a settings panel with handedness swap and sensitivity sliders (strum threshold,
+smoothing, hex size), persisted in localStorage. Earlier ADRs deferred the power-chord octave (0014) and
+sound-control persistence (0017) to this task.
+
+**Decision:**
+1. **One `Settings` object** (`src/settings.ts`): `leftHanded, strumThreshold, smoothing, hexSize,
+   powerOctave, instrument, volume, reverb`, stored as JSON under `strhapshody.settings.v1`. Sliders are
+   saved as **0..1 knob positions**, not engine units, and mapped by pure functions, so units can be
+   retuned without invalidating saved settings. `validateSettings` merges field-by-field with defaults
+   (clamping knobs), so one bad field from an older build never resets the others.
+2. **Mappings:** strum threshold → strum detector min crossing speed `2·height·t²` px/s (default 0.3 ≈
+   130 px/s on 720 px: above a drifting hand, far below a strum); smoothing → One Euro `min_cutoff`
+   exponential 5 Hz → 0.3 Hz (default ≈ 1.4 Hz, ~the old fixed 1.5); hex size → radius scale 0.6–1.0 of
+   the largest flower that fits.
+3. **Strum threshold lives in the engine** (`StrumDetector.setMinVelocity`): too-slow steps emit nothing
+   but still advance the reference point, so a slowly passed line is skipped, never fired late
+   (cargo-tested). It's strum-detection logic, so per CLAUDE.md it's Rust, not a TS filter.
+4. **Left-handed mirrors everything:** `assignHands({ leftHanded })` swaps the label→role map and the
+   screen-side fallback; `calibratedZones(…, leftHanded)` puts the chord zone in the right half; tints,
+   zone labels, calibration prompts and the control panel (always on the strum side, so it never covers
+   the flower) follow. Calibration now stores `chord`/`strum` boxes plus the handedness they were recorded
+   with; switching handedness mirrors them (x → 1−x) instead of discarding them.
+
+**Consequences:** changing a setting re-seeds what it affects (smoothing rebuilds the cursor filters;
+handedness resets every per-hand detector). Retuning mapping constants is not an ADR change; storing
+engine units or dropping the field-wise merge would supersede this.
