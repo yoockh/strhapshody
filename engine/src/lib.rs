@@ -34,6 +34,9 @@ pub use powerstrip::{PowerPair, PowerStrip};
 pub mod pluck;
 pub use pluck::render_pluck;
 
+pub mod distortion;
+pub use distortion::distortion_curve;
+
 /// Trivial number round-trip: proves primitive values marshal across the
 /// JS <-> WASM boundary. Used by the TS round-trip test for task 0.2.
 #[wasm_bindgen]

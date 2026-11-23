@@ -33,7 +33,7 @@ export {
   ChordQuality,
 } from "../engine/pkg/engine.js";
 export { PowerStrip, PowerPair } from "../engine/pkg/engine.js";
-export { renderPluck, GestureDetector } from "../engine/pkg/engine.js";
+export { renderPluck, distortionCurve, GestureDetector } from "../engine/pkg/engine.js";
 
 let ready: Promise<void> | null = null;
 

@@ -9,6 +9,12 @@
  * loaded — until then, or if a render fails, a triangle-oscillator placeholder
  * pluck keeps the instrument playable.
  *
+ * Instruments (task 5.2, ADR-0016): **acoustic** goes straight to the master
+ * bus; **electric clean** and **electric distortion** share one chain —
+ * `WaveShaperNode` (curve from the Rust `distortion` module, injected via
+ * `setCurveGenerator`; drive 0 = identity = clean) → lowpass tone control →
+ * level compensation → master. Electric plucks are brighter and sustain longer.
+ *
  * ADR-0002 split: the pure, camera/DOM-free logic — strum velocity → gain
  * (`velocityToGain`) and the per-note Karplus-Strong parameters
  * (`acousticPluckParams`: ring time by pitch, brightness by velocity, palm-mute
@@ -114,6 +120,87 @@ export function acousticPluckParams(
   return { t60, brightness: bright, duration: Math.min(t60, MAX_RENDER_S) };
 }
 
+/** The playable instruments (PRD §9). */
+export type Instrument = "acoustic" | "clean" | "distortion";
+
+/** Toggle order and status-bar names. */
+export const INSTRUMENTS: readonly Instrument[] = ["acoustic", "clean", "distortion"];
+export const INSTRUMENT_LABELS: Readonly<Record<Instrument, string>> = {
+  acoustic: "Acoustic",
+  clean: "Electric Clean",
+  distortion: "Electric Dist",
+};
+
+/** Electric strings: brighter attack, longer sustain than the acoustic. */
+const ELECTRIC_T60_AT_110 = 7;
+const ELECTRIC_T60_MIN = 2.5;
+const ELECTRIC_T60_MAX = 9;
+const ELECTRIC_MAX_RENDER_S = 4.5;
+const ELECTRIC_BRIGHTNESS_MIN = 0.6;
+const ELECTRIC_BRIGHTNESS_MAX = 1;
+
+/**
+ * Karplus-Strong parameters for one pluck on `instrument`. Acoustic is
+ * `acousticPluckParams`; both electric instruments use a brighter excitation
+ * and a longer ring (T60 ∝ 1/√f clamped to [2.5, 9] s, rendered ≤ 4.5 s) —
+ * the distortion itself is applied downstream, not here. Palm-muted plucks are
+ * the same short thud on every instrument (on distortion that's the "chug").
+ */
+export function pluckParams(
+  instrument: Instrument,
+  freq: number,
+  velocity: number,
+  muted = false,
+): AcousticPluckParams {
+  if (instrument === "acoustic" || muted) return acousticPluckParams(freq, velocity, muted);
+  const f = Number.isFinite(freq) && freq > 0 ? freq : 110;
+  const v = Number.isFinite(velocity) && velocity > 0 ? velocity : 0;
+  const t = Math.min(1, v / 3000);
+  const brightness =
+    ELECTRIC_BRIGHTNESS_MIN + (ELECTRIC_BRIGHTNESS_MAX - ELECTRIC_BRIGHTNESS_MIN) * t;
+  const t60 = Math.min(
+    ELECTRIC_T60_MAX,
+    Math.max(ELECTRIC_T60_MIN, ELECTRIC_T60_AT_110 * Math.sqrt(110 / f)),
+  );
+  return { t60, brightness, duration: Math.min(t60, ELECTRIC_MAX_RENDER_S) };
+}
+
+/** Tone-control lowpass range, Hz. */
+export const TONE_MIN_HZ = 700;
+export const TONE_MAX_HZ = 12_000;
+
+/**
+ * Tone knob `[0, 1]` → lowpass cutoff in Hz, exponential (equal steps sound
+ * equal): 0 → 700 Hz (dark), 1 → 12 kHz (open). Out-of-range / non-finite
+ * input is clamped / treated as 0.5.
+ */
+export function toneToCutoff(tone: number): number {
+  const t = Number.isFinite(tone) ? Math.min(1, Math.max(0, tone)) : 0.5;
+  return TONE_MIN_HZ * Math.pow(TONE_MAX_HZ / TONE_MIN_HZ, t);
+}
+
+/**
+ * Output gain that keeps the electric chain's loudness roughly constant as
+ * drive rises (a saturated signal has far more RMS than a clean one at the
+ * same peak): `1 / (1 + 12·drive)`, so clean = 1 and full drive ≈ 0.077. Tuned
+ * in headless Chromium so the default distortion (drive 0.6) lands ~1.2× the
+ * clean RMS — a touch louder, as a dirt channel should feel, not +7 dB.
+ */
+export function driveCompensation(drive: number): number {
+  const d = Number.isFinite(drive) ? Math.min(1, Math.max(0, drive)) : 0;
+  return 1 / (1 + 12 * d);
+}
+
+/** Default drive for the distortion instrument, and the tone default. */
+export const DEFAULT_DRIVE = 0.6;
+export const DEFAULT_TONE = 0.65;
+
+/**
+ * Builds a waveshaper curve (the engine's `distortionCurve`): table length and
+ * drive in [0, 1] → `Float32Array` for `WaveShaperNode.curve`.
+ */
+export type CurveGenerator = (samples: number, drive: number) => Float32Array;
+
 /** A single live plucked-string voice (source + its gain). */
 interface Voice {
   readonly source: AudioScheduledSourceNode;
@@ -150,8 +237,21 @@ export interface AudioEngine {
    * note at a time. Out-of-range indices are ignored.
    */
   pluck(index: number, velocity: number, muted?: boolean): void;
-  /** Silence every ringing string immediately (fist-stop, task 2.3 → Phase). */
+  /** Silence every ringing string immediately (fist-stop). */
   stopAll(): void;
+  /** Switch instrument (new plucks use its voice; routing crossfades). */
+  setInstrument(instrument: Instrument): void;
+  /** The current instrument. */
+  readonly instrument: Instrument;
+  /** Distortion drive `[0, 1]` for the distortion instrument. */
+  setDrive(drive: number): void;
+  /** Electric tone `[0, 1]` (dark → bright). */
+  setTone(tone: number): void;
+  /**
+   * Install the waveshaper curve generator. Until one is installed the shaper
+   * has no curve (passes audio through), so electric sounds clean.
+   */
+  setCurveGenerator(generate: CurveGenerator | null): void;
   /** Release the audio context and all voices. Idempotent. */
   close(): void;
 }
@@ -160,6 +260,12 @@ export interface AudioEngine {
 const ATTACK_S = 0.004;
 const DECAY_S = 1.4;
 const MASTER_GAIN = 0.35;
+/** Level into the shaper: keeps six summed voices mostly inside [-1, 1]. */
+const SHAPER_IN_GAIN = 0.3;
+/** Waveshaper table length (odd → an exact entry at 0). */
+const CURVE_SAMPLES = 2049;
+/** Crossfade time constant when switching instruments, seconds. */
+const ROUTE_TC_S = 0.01;
 
 /**
  * Create the Web Audio engine. Constructs a (suspended) `AudioContext`; nothing
@@ -176,10 +282,74 @@ export function createAudioEngine(): AudioEngine {
 
   const ctx = new Ctor();
 
-  // Master bus: all voices → master gain → speakers.
+  // Master bus → speakers.
   const master = ctx.createGain();
   master.gain.value = MASTER_GAIN;
   master.connect(ctx.destination);
+
+  // Voices → bus, which feeds two routes (only one open at a time):
+  //   acoustic: bus → acousticSend → master
+  //   electric: bus → electricSend → shaper → tone → electricOut → master
+  const bus = ctx.createGain();
+  const acousticSend = ctx.createGain();
+  const electricSend = ctx.createGain();
+  const shaper = ctx.createWaveShaper();
+  shaper.oversample = "4x";
+  const tone = ctx.createBiquadFilter();
+  tone.type = "lowpass";
+  tone.Q.value = 0.7;
+  const electricOut = ctx.createGain();
+  bus.connect(acousticSend).connect(master);
+  bus.connect(electricSend).connect(shaper).connect(tone).connect(electricOut).connect(master);
+
+  let instrument: Instrument = "acoustic";
+  let drive = DEFAULT_DRIVE;
+  let toneValue = DEFAULT_TONE;
+  let generateCurve: CurveGenerator | null = null;
+  // Curve cache by quantised drive (regenerating is cheap but not free).
+  const curveCache = new Map<number, Float32Array<ArrayBuffer>>();
+
+  /** Drive actually applied by the shaper for the current instrument. */
+  function activeDrive(): number {
+    return instrument === "distortion" ? drive : 0;
+  }
+
+  function applyRouting(immediate = false): void {
+    const now = ctx.currentTime;
+    const electric = instrument !== "acoustic";
+    const set = (p: AudioParam, v: number): void => {
+      if (immediate) p.value = v;
+      else p.setTargetAtTime(v, now, ROUTE_TC_S);
+    };
+    set(acousticSend.gain, electric ? 0 : 1);
+    set(electricSend.gain, electric ? SHAPER_IN_GAIN : 0);
+    set(electricOut.gain, driveCompensation(activeDrive()) / SHAPER_IN_GAIN);
+    set(tone.frequency, toneToCutoff(toneValue));
+    applyCurve();
+  }
+
+  function applyCurve(): void {
+    const d = activeDrive();
+    if (!generateCurve || d <= 0) {
+      shaper.curve = null; // pass-through = clean
+      return;
+    }
+    const key = Math.round(d * 100);
+    let curve = curveCache.get(key);
+    if (!curve) {
+      try {
+        const raw = generateCurve(CURVE_SAMPLES, key / 100);
+        curve = new Float32Array(raw.length);
+        curve.set(raw);
+        curveCache.set(key, curve);
+      } catch {
+        shaper.curve = null;
+        return;
+      }
+    }
+    shaper.curve = curve;
+  }
+  applyRouting(true);
 
   let chord: number[] = [...TEST_CHORD_FREQUENCIES];
   // One active voice slot per string; a new pluck replaces the old one.
@@ -214,7 +384,7 @@ export function createAudioEngine(): AudioEngine {
     now: number,
   ): AudioScheduledSourceNode | null {
     if (!renderPluck) return null;
-    const p = acousticPluckParams(freq, velocity, muted);
+    const p = pluckParams(instrument, freq, velocity, muted);
     let samples: Float32Array;
     try {
       seed = (seed + 1) >>> 0 || 1;
@@ -297,7 +467,7 @@ export function createAudioEngine(): AudioEngine {
       const source = karplusStrongSource(freq, velocity, muted, peak, gain, now)
         ?? oscillatorSource(freq, muted, peak, gain, now);
 
-      gain.connect(master);
+      gain.connect(bus);
       const voice: Voice = { source, gain };
       voices[index] = voice;
       source.onended = () => {
@@ -307,6 +477,34 @@ export function createAudioEngine(): AudioEngine {
 
     stopAll(): void {
       for (let i = 0; i < voices.length; i++) stopVoice(i);
+    },
+
+    setInstrument(next: Instrument): void {
+      if (!INSTRUMENTS.includes(next) || next === instrument) return;
+      instrument = next;
+      if (!closed) applyRouting();
+    },
+
+    get instrument(): Instrument {
+      return instrument;
+    },
+
+    setDrive(value: number): void {
+      if (!Number.isFinite(value)) return;
+      drive = Math.min(1, Math.max(0, value));
+      if (!closed) applyRouting();
+    },
+
+    setTone(value: number): void {
+      if (!Number.isFinite(value)) return;
+      toneValue = Math.min(1, Math.max(0, value));
+      if (!closed) applyRouting();
+    },
+
+    setCurveGenerator(generate: CurveGenerator | null): void {
+      generateCurve = generate;
+      curveCache.clear();
+      if (!closed) applyCurve();
     },
 
     close(): void {

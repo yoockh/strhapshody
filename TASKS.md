@@ -63,7 +63,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 - [x] 5.1 Acoustic instrument voice (Karplus-Strong plucked-string model is the pragmatic
       choice — no sample licensing, genuinely testable by inspecting the output buffer).
-- [ ] 5.2 Electric clean + distortion voice: Web Audio `WaveShaperNode` driven by a Rust/WASM
+- [x] 5.2 Electric clean + distortion voice: Web Audio `WaveShaperNode` driven by a Rust/WASM
       curve generator with a drive parameter, plus a basic tone control (lowpass/shelf).
 - [ ] 5.3 Instrument toggle (on-screen + keyboard shortcut), volume control, simple reverb
       (ConvolverNode or algorithmic) amount control.

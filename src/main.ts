@@ -29,6 +29,7 @@ import {
   ChordLatch,
   PowerStrip,
   renderPluck,
+  distortionCurve,
   GestureDetector,
   type GestureDetectorInstance,
   type StrumDetectorInstance,
@@ -197,6 +198,8 @@ initEngine()
     engineReady = true;
     // Swap the placeholder oscillator for the Karplus-Strong voice (task 5.1).
     audioEngine?.setPluckRenderer(renderPluck);
+    // And the waveshaper curve for the electric/distortion voice (task 5.2).
+    audioEngine?.setCurveGenerator(distortionCurve);
   })
   .catch((err: unknown) => {
     console.warn("[strhapshody] engine init failed:", err);

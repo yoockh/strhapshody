@@ -493,3 +493,32 @@ Web Audio; (c) how per-note parameters are chosen.
 **Consequences:** the electric voice (5.2) reuses the same KS source and adds a waveshaper/tone chain after
 the voices. Retuning T60/brightness constants is feel-tuning, not an ADR change; moving synthesis into an
 AudioWorklet or to samples would supersede this.
+
+## ADR-0016: Electric voice — shared waveshaper chain with drive 0 as "clean", curve from the engine
+
+**Context:** task 5.2 adds an electric clean + distortion voice: a `WaveShaperNode` driven by a Rust curve
+generator with a drive parameter, plus a basic tone control. Questions: (a) curve shape; (b) whether clean
+and distortion are separate chains; (c) tone control form; (d) keeping loudness sane as drive rises.
+
+**Decision:**
+1. **Curve = normalised tanh soft clip** `y = tanh(k·x)/tanh(k)`, `k = 40·drive`, from the new engine module
+   `distortion.rs` (`distortionCurve(samples, drive)`). Odd-symmetric (no DC, odd harmonics), monotonic,
+   `y(±1) = ±1`, identity at drive 0. Cargo-tested on those properties plus "more drive ⇒ more gain and a
+   squarer sine" (crest factor √2 → ~1).
+2. **One electric chain for both instruments**: voices → bus → (acoustic send → master) or (electric send
+   ×0.3 → WaveShaper 4× oversampled → lowpass tone → compensation gain → master). "Electric Clean" is the
+   same chain at drive 0 (shaper curve `null` = pass-through), "Electric Dist" uses the drive (default 0.6).
+   Switching crossfades the two sends (10 ms time constant). The curve generator is injected after engine
+   init, like the pluck renderer (ADR-0015); before then electric is simply clean. Curves are cached per
+   1% of drive.
+3. **Tone = 12 dB/oct lowpass**, knob `[0,1]` mapped exponentially to 700 Hz–12 kHz (`toneToCutoff`),
+   default 0.65 (~4.4 kHz) to tame the fizz of the saturated highs. Acoustic bypasses it.
+4. **Level compensation** `1/(1+12·drive)` on the chain output, tuned by measuring master-bus RMS in
+   headless Chromium (6-string strum): acoustic 0.088, clean 0.099, distortion 0.118 — distortion lands a
+   little louder, not +7 dB as with a weaker factor. Electric plucks use brighter excitation and longer
+   T60 (∝1/√f, 2.5–9 s) than acoustic.
+
+**Consequences:** `AudioEngine` gains `setInstrument / instrument / setDrive / setTone /
+setCurveGenerator`; task 5.3 adds the UI toggle and reverb on top. Changing k, the tone range or the
+compensation constant is tuning; a separate clean chain, an asymmetric curve, or moving the curve into TS
+would supersede this.

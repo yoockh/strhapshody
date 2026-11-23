@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { acousticPluckParams, velocityToGain } from "./audio.ts";
+import {
+  acousticPluckParams,
+  driveCompensation,
+  INSTRUMENT_LABELS,
+  INSTRUMENTS,
+  pluckParams,
+  TONE_MAX_HZ,
+  TONE_MIN_HZ,
+  toneToCutoff,
+  velocityToGain,
+} from "./audio.ts";
 
 // Only the pure velocity→gain mapping is unit-tested here; the Web Audio
 // wrapper (createAudioEngine) needs a live AudioContext and is exercised by the
@@ -109,5 +119,74 @@ describe("acousticPluckParams", () => {
         expect(x).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("pluckParams", () => {
+  it("acoustic is exactly acousticPluckParams", () => {
+    expect(pluckParams("acoustic", 196, 1200)).toEqual(acousticPluckParams(196, 1200));
+  });
+
+  it("electric instruments sustain longer and are brighter than acoustic", () => {
+    for (const inst of ["clean", "distortion"] as const) {
+      for (const f of [82.41, 196, 329.63]) {
+        const e = pluckParams(inst, f, 1500);
+        const a = acousticPluckParams(f, 1500);
+        expect(e.t60).toBeGreaterThan(a.t60);
+        expect(e.brightness).toBeGreaterThan(a.brightness);
+        expect(e.duration).toBeLessThanOrEqual(4.5);
+        expect(e.duration).toBeLessThanOrEqual(e.t60);
+      }
+    }
+  });
+
+  it("palm mute is the same short thud on every instrument", () => {
+    const a = pluckParams("acoustic", 110, 2000, true);
+    expect(pluckParams("clean", 110, 2000, true)).toEqual(a);
+    expect(pluckParams("distortion", 110, 2000, true)).toEqual(a);
+  });
+
+  it("is total for bad inputs", () => {
+    const p = pluckParams("distortion", Number.NaN, -1);
+    for (const x of [p.t60, p.brightness, p.duration]) {
+      expect(Number.isFinite(x)).toBe(true);
+      expect(x).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("instrument list", () => {
+  it("has a label for every instrument, acoustic first", () => {
+    expect(INSTRUMENTS[0]).toBe("acoustic");
+    for (const i of INSTRUMENTS) expect(INSTRUMENT_LABELS[i].length).toBeGreaterThan(0);
+  });
+});
+
+describe("toneToCutoff", () => {
+  it("maps the ends of the knob to the range ends", () => {
+    expect(toneToCutoff(0)).toBeCloseTo(TONE_MIN_HZ, 6);
+    expect(toneToCutoff(1)).toBeCloseTo(TONE_MAX_HZ, 6);
+  });
+  it("is exponential: the midpoint is the geometric mean", () => {
+    expect(toneToCutoff(0.5)).toBeCloseTo(Math.sqrt(TONE_MIN_HZ * TONE_MAX_HZ), 6);
+  });
+  it("is monotonic, clamped, and NaN-safe", () => {
+    expect(toneToCutoff(0.3)).toBeLessThan(toneToCutoff(0.6));
+    expect(toneToCutoff(-4)).toBeCloseTo(TONE_MIN_HZ, 6);
+    expect(toneToCutoff(9)).toBeCloseTo(TONE_MAX_HZ, 6);
+    expect(toneToCutoff(Number.NaN)).toBeCloseTo(toneToCutoff(0.5), 6);
+  });
+});
+
+describe("driveCompensation", () => {
+  it("is unity when clean and falls as drive rises", () => {
+    expect(driveCompensation(0)).toBe(1);
+    expect(driveCompensation(0.6)).toBeLessThan(driveCompensation(0.3));
+    expect(driveCompensation(1)).toBeCloseTo(1 / 13, 10);
+  });
+  it("clamps and is NaN-safe", () => {
+    expect(driveCompensation(-1)).toBe(1);
+    expect(driveCompensation(5)).toBeCloseTo(1 / 13, 10);
+    expect(driveCompensation(Number.NaN)).toBe(1);
   });
 });

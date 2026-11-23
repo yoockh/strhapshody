@@ -716,3 +716,24 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   `cargo test` unchanged (118).
 - needs human verification: whether a real flat palm / fist reads reliably while strumming and whether
   palm-muted strums feel right — real camera + hands.
+
+## 2026-11-23 14:35 WIB — task 5.2 electric clean + distortion voice
+
+- did: new engine module `engine/src/distortion.rs` — normalised tanh waveshaper table generator,
+  `distortionCurve(samples, drive)` (ADR-0016). `audio.ts`: voices now feed a bus with two routes —
+  acoustic straight to master, electric through `WaveShaperNode` (4× oversample, curve from the engine,
+  injected via `setCurveGenerator` after init, cached per 1% drive) → lowpass tone → drive-compensation
+  gain. New `Instrument` type (`acoustic | clean | distortion`) + labels + `setInstrument/setDrive/setTone`;
+  clean = drive 0 = shaper pass-through. Pure helpers: `pluckParams(instrument, …)` (electric brighter,
+  longer T60), `toneToCutoff` (exp 700 Hz–12 kHz), `driveCompensation` (1/(1+12·drive)).
+- tested: `cargo test` 127 passed (+9 distortion: length clamp, identity at drive 0, exact ±1 endpoints +
+  silent centre, odd symmetry, monotonic/bounded, gain/saturation rise with drive, sine crest factor
+  √2→<1.1, sanitisation, wasm = core). `npm run test` 168 passed (+10). typecheck 0, build clean.
+  **New in-browser audio check** (scratch Playwright script against the Vite dev server, importing
+  `audio.ts` + the engine, analyser tapped on the master bus, 6-string pluck): all three instruments
+  produce signal; crest factor acoustic 3.4 / clean 4.3 / distortion 1.7 (squared up as expected); RMS
+  0.088 / 0.099 / 0.118 after retuning the compensation from 1/(1+6d) (which left distortion +7 dB).
+  This becomes a real Playwright test in 7.1.
+- next: task 5.3 instrument toggle (on-screen + keyboard), volume, reverb amount.
+- needs human verification: whether the distortion *sounds* good (drive 0.6, tone 0.65 defaults) and the
+  clean electric reads as "electric" on real speakers.
