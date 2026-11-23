@@ -29,6 +29,8 @@ import {
   ChordLatch,
   PowerStrip,
   renderPluck,
+  GestureDetector,
+  type GestureDetectorInstance,
   type StrumDetectorInstance,
   type HexMapInstance,
   type OneEuroFilterInstance,
@@ -51,6 +53,7 @@ import {
 import { NO_CHORD_LABEL } from "./chord.ts";
 import { powerChordLabel, selectVoicing, type PowerSelection } from "./voicing.ts";
 import { createAudioEngine, type AudioEngine } from "./audio.ts";
+import { modeLabel, SHAPE_NEUTRAL, strumGestureAction } from "./strumgesture.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
 /** Adapt a MediaPipe result into the pure `RawHand[]` the assigner consumes. */
@@ -111,6 +114,11 @@ let engineReady = false;
 let strumDetector: StrumDetectorInstance | null = null;
 // String-line y signature the current detector was built for; rebuilt on resize.
 let strumGeometry = "";
+// Right-hand shape (task 2.3 engine module, wired here): open palm = palm mute,
+// fist = stop (PRD §8). Debounced in the engine; reset on strum-hand loss.
+let gestureDetector: GestureDetectorInstance | null = null;
+let strumShape = SHAPE_NEUTRAL;
+const GESTURE_HOLD_FRAMES = 3;
 
 // Chord-flower state (task 3.2). The WASM `hexmap` selector (ADR-0010) decides
 // which of the 7 cells the left hand's palm cursor is in, with border
@@ -327,11 +335,22 @@ function processStrum(
   const lm =
     strumHand && latestHands ? latestHands.landmarks[strumHand.index] : undefined;
 
+  if (!gestureDetector) gestureDetector = new GestureDetector(GESTURE_HOLD_FRAMES);
+
   if (!webcam || !strumHand || !lm || !lm[0] || !lm[9]) {
-    // No tracked strum hand this frame — re-seed so the next push doesn't jump.
+    // No tracked strum hand this frame — re-seed so the next push doesn't jump,
+    // and drop any palm-mute / stop modifier with the hand.
     strumDetector.reset();
+    gestureDetector.reset();
+    strumShape = SHAPE_NEUTRAL;
     return;
   }
+
+  // Hand shape → fist stop / palm mute (PRD §8).
+  const shape: number = gestureDetector.update(flattenLandmarks(lm));
+  const gesture = strumGestureAction(strumShape, shape);
+  strumShape = shape;
+  if (gesture.stopAll) audioEngine?.stopAll();
 
   // Palm centre (wrist + middle-MCP mean), mapped through the same cover-crop +
   // mirror transform as the feed/overlay so the y lines up with the strings.
@@ -350,7 +369,7 @@ function processStrum(
   // chord in Power mode, the latched hex chord otherwise (tasks 3.5/4.3). In
   // Power mode the voicing only has the 2–3 power-chord strings non-zero, so the
   // plucks below on any other string are silent: that's the strum restriction.
-  if (events.length > 0) {
+  if (events.length > 0 && !gesture.suppressPlucks) {
     chordLatch?.commit();
     applySoundingVoicing();
   }
@@ -359,7 +378,7 @@ function processStrum(
     const index = ev.string_index;
     const velocity = ev.velocity;
     ev.free();
-    audioEngine?.pluck(index, velocity);
+    if (!gesture.suppressPlucks) audioEngine?.pluck(index, velocity, gesture.muted);
   }
 }
 
@@ -538,7 +557,7 @@ function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
 
   return {
     chord: soundingLabel,
-    mode: playMode,
+    mode: modeLabel(playMode, strumShape),
     instrument: "Acoustic",
     tracking,
   };
@@ -582,4 +601,5 @@ window.addEventListener("beforeunload", () => {
   fingerCount?.free();
   chordLatch?.free();
   powerStrip?.free();
+  gestureDetector?.free();
 });

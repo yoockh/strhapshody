@@ -19,7 +19,8 @@ import { roleIsTracked } from "./handedness.ts";
 /** Status-bar fields (PRD §5). All placeholders until later phases wire them. */
 export interface StatusBarModel {
   readonly chord: string;
-  readonly mode: "Chord" | "Power";
+  /** Play mode plus any right-hand modifier, e.g. "Power · palm mute". */
+  readonly mode: string;
   readonly instrument: string;
   readonly tracking: string;
 }

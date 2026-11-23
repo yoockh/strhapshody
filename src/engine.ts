@@ -21,6 +21,7 @@ import init, {
   FingerCountDetector,
   ChordLatch,
   PowerStrip,
+  GestureDetector,
 } from "../engine/pkg/engine.js";
 export { StrumDetector } from "../engine/pkg/engine.js";
 export { StrumDirection } from "../engine/pkg/engine.js";
@@ -32,7 +33,7 @@ export {
   ChordQuality,
 } from "../engine/pkg/engine.js";
 export { PowerStrip, PowerPair } from "../engine/pkg/engine.js";
-export { renderPluck } from "../engine/pkg/engine.js";
+export { renderPluck, GestureDetector } from "../engine/pkg/engine.js";
 
 let ready: Promise<void> | null = null;
 
@@ -55,3 +56,4 @@ export type OneEuroFilterInstance = InstanceType<typeof OneEuroFilter>;
 export type FingerCountDetectorInstance = InstanceType<typeof FingerCountDetector>;
 export type ChordLatchInstance = InstanceType<typeof ChordLatch>;
 export type PowerStripInstance = InstanceType<typeof PowerStrip>;
+export type GestureDetectorInstance = InstanceType<typeof GestureDetector>;

@@ -702,3 +702,17 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   commit), then task 5.2 electric clean + distortion (Rust waveshaper curve + tone control).
 - needs human verification: whether the KS acoustic voice *sounds* like a guitar on real speakers, the
   ring-time/brightness feel, and loudness balance across strings — no audio output in this env.
+
+## 2026-11-23 14:15 WIB — wire palm-mute / fist-stop gestures into audio (2.3 follow-up)
+
+- did: the 2.3 `GestureDetector` was cargo-tested but never connected to sound. New pure
+  `src/strumgesture.ts`: `strumGestureAction(prev, cur)` — entering a fist → `stopAll` once, plucks
+  suppressed while the fist is held (so the stop sticks if the closed hand drifts across the strings);
+  open palm → plucks palm-muted (`pluck(i, v, true)` → KS with T60 0.18 s, darker); `modeLabel` adds the
+  modifier to the status bar MODE field ("Power · palm mute", "Chord · stop"). `main.ts` runs the
+  detector (hold 3 frames) on the strum hand's flattened landmarks each frame and resets it on hand loss.
+  No new ADR: realises ADR-0008/0009's planned wiring.
+- tested: `npm run test` 158 passed (+7 strumgesture), typecheck 0, build clean, smoke load OK.
+  `cargo test` unchanged (118).
+- needs human verification: whether a real flat palm / fist reads reliably while strumming and whether
+  palm-muted strums feel right — real camera + hands.
