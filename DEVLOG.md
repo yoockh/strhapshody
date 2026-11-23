@@ -901,3 +901,16 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   - About 42 ms of the remaining figure is the (fake) device's reported base + output latency; real
     hardware will differ. Camera → sound still needs a real camera (`?latency`).
 - tested: `npm run test` 271 passed (+6 lru, +2 cache keys, +1 latency), e2e 7 passed, typecheck 0.
+
+## 2026-11-23 18:45 WIB — task 7.3 README (setup, limitations, manual checklist)
+
+- did: rewrote `README.md` from a one-line stub: what it is, how to play (layout diagram, left/right hand
+  tables, calibration, keyboard keys, panel/settings, `?latency`), setup from zero (Node ≥ 22.12 — vitest 5
+  requires it — rustup + wasm32 target + wasm-pack, `npm install`, `build:engine`, `dev`), production
+  build, test commands, troubleshooting (camera, MediaPipe offline, autoplay, the old-`wasm-opt`
+  instantiate error found this session, swapped zones → `DEFAULT_HANDEDNESS_ROLE`, esbuild warning),
+  known limitations (no human/camera testing yet, latency numbers, CDN, browsers, no Tauri), and a manual
+  test checklist for Yaya built from every "needs human verification" note in this log, ending with the
+  `?latency` numbers to report back. Phase 7 / all MVP boxes complete.
+- tested: `cargo test` 140, `npm run test` 271, `npm run test:e2e` 7 (incl. latency harness), typecheck,
+  build — all green. Fresh-clone check of the README steps: see next entry.

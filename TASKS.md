@@ -86,7 +86,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       audio context produced sound events for each chord.
 - [x] 7.2 Latency measurement harness: timestamp strum-event detection vs. audio start, log
       p50/p95 against the <100ms (ideal <60ms) target from PRD §10; record results in DEVLOG.md.
-- [ ] 7.3 `README.md` rewritten with real setup/run/build instructions, known limitations
+- [x] 7.3 `README.md` rewritten with real setup/run/build instructions, known limitations
       (needs real webcam + hands for full experience — see "needs human verification" entries
       in DEVLOG.md), and a manual test checklist for Yaya to run once with her actual camera.
 
