@@ -84,7 +84,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 - [x] 7.1 Playwright end-to-end test: launch with `--use-fake-device-for-media-stream` and a
       fake video file, drive the keyboard-fallback path through a C–G–Am–F progression, assert
       audio context produced sound events for each chord.
-- [ ] 7.2 Latency measurement harness: timestamp strum-event detection vs. audio start, log
+- [x] 7.2 Latency measurement harness: timestamp strum-event detection vs. audio start, log
       p50/p95 against the <100ms (ideal <60ms) target from PRD §10; record results in DEVLOG.md.
 - [ ] 7.3 `README.md` rewritten with real setup/run/build instructions, known limitations
       (needs real webcam + hands for full experience — see "needs human verification" entries

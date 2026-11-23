@@ -676,3 +676,27 @@ fallback through C–G–Am–F and asserting that the audio context produced so
 
 **Consequences:** hand-tracking accuracy and feel remain untestable here (TESTING.md); new UI/audio
 features should add an e2e case driven through the keyboard or the hook rather than mocks.
+
+## ADR-0023: Latency = detection → audible via getOutputTimestamp; camera → sound measured live with `?latency`
+
+**Context:** task 7.2 — timestamp strum-event detection vs. audio start, report p50/p95 against PRD §10
+(< 100 ms, ideally < 60 ms). There is no camera or audio device here, and the camera → detection part
+(frame capture, MediaPipe) can only be measured on real hardware.
+
+**Decision:**
+1. **What "audio start" means:** the performance-clock time at which the first voice's first sample
+   reaches the output device, obtained by mapping its audio-clock start through
+   `AudioContext.getOutputTimestamp()` (which pairs an audio-clock time with the performance time it is
+   presented, so device buffering is included). Fallback when no usable timestamp: scheduling delay +
+   `baseLatency + outputLatency`. "Detection" is the key event's `timeStamp` (keyboard) or the moment the
+   strum detector returned crossings (hands). Pure maths in `src/latency.ts` (nearest-rank p50/p95).
+2. **In-app log, two readers:** every strum boundary appends a sample (ring buffer of 200) with JS
+   processing time and — for hand strums — the frame's camera `captureTime` from
+   `requestVideoFrameCallback`, giving an end-to-end camera → sound figure. The Playwright harness
+   (`e2e/latency.spec.ts`, 60 keyboard strums cycling C/G/Am/F) reads it through the debug hook, writes
+   `test-results/latency.json` and fails if p95 ≥ 100 ms; `?latency` in the URL draws a live p50/p95
+   readout so the camera path can be measured with real hands.
+
+**Consequences:** headless numbers reflect Chromium's fake output device (outputLatency 32 ms); real
+hardware differs, so the README checklist asks for a `?latency` reading. A per-string sub-frame crossing
+time (ADR-0007 note) would refine hand-path detection timestamps without changing this contract.

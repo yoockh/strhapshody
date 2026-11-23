@@ -314,8 +314,17 @@ export interface AudioEngine {
   outputLevel(): number;
   /** The note set currently loaded (Hz per string, 0 = silent string). */
   currentChord(): readonly number[];
-  /** The underlying AudioContext's current time and output latency (seconds). */
-  clock(): { readonly currentTime: number; readonly outputLatency: number; readonly baseLatency: number };
+  /**
+   * The AudioContext's current time and reported latencies (seconds), plus
+   * `getOutputTimestamp()` where supported — used by the latency harness
+   * (task 7.2) to map audio-clock times onto `performance.now()`.
+   */
+  clock(): {
+    readonly currentTime: number;
+    readonly outputLatency: number;
+    readonly baseLatency: number;
+    readonly outputTimestamp: { readonly contextTime: number; readonly performanceTime: number } | null;
+  };
   /** Release the audio context and all voices. Idempotent. */
   close(): void;
 }
@@ -614,10 +623,23 @@ export function createAudioEngine(): AudioEngine {
     },
 
     clock() {
+      let outputTimestamp: { contextTime: number; performanceTime: number } | null = null;
+      try {
+        if (typeof ctx.getOutputTimestamp === "function") {
+          const ts = ctx.getOutputTimestamp();
+          outputTimestamp = {
+            contextTime: ts.contextTime ?? 0,
+            performanceTime: ts.performanceTime ?? 0,
+          };
+        }
+      } catch {
+        outputTimestamp = null;
+      }
       return {
         currentTime: ctx.currentTime,
         outputLatency: (ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0,
         baseLatency: ctx.baseLatency ?? 0,
+        outputTimestamp,
       };
     },
 

@@ -26,6 +26,7 @@ import {
 } from "./hud.ts";
 import { drawStrings, computeStringYs, stringGlow, STRING_COUNT } from "./strings.ts";
 import { KEYBOARD_HELP, keyAction, rakeSchedule, type ChordLetter } from "./keyboard.ts";
+import { LatencyLog, latencyVerdict, type LatencySummary } from "./latency.ts";
 import {
   initEngine,
   StrumDetector,
@@ -207,6 +208,39 @@ let pendingPower: PowerSelection | null = null;
 // and its status-bar label ("Am", "G5 (fret 3, low E)").
 let soundingKey = "";
 let soundingLabel = NO_CHORD_LABEL;
+// Strum latency samples (task 7.2): one per strum boundary, read by the e2e
+// harness through the debug hook and shown live with `?latency` in the URL.
+const latencyLog = new LatencyLog(200);
+const SHOW_LATENCY = new URLSearchParams(location.search).has("latency");
+// Camera capture time (performance clock, ms) of the latest video frame, from
+// requestVideoFrameCallback — the start of the end-to-end latency chain.
+let frameCaptureMs: number | null = null;
+
+/**
+ * Record a latency sample for a strum whose first voice was just scheduled.
+ * `ctxAtDetect` is the audio-clock time when the voices were scheduled (the
+ * first voice starts then — rakes only delay the later strings).
+ */
+function recordLatency(
+  source: "hand" | "keyboard",
+  detectMs: number,
+  captureMs: number | null,
+  ctxAtDetect: number,
+): void {
+  if (!audioEngine) return;
+  const c = audioEngine.clock();
+  latencyLog.add({
+    source,
+    detectMs,
+    scheduledMs: performance.now(),
+    captureMs,
+    voiceCtxTime: ctxAtDetect,
+    ctxTimeAtSchedule: c.currentTime,
+    outputTimestamp: c.outputTimestamp,
+    reportedLatency: c.baseLatency + c.outputLatency,
+  });
+}
+
 // Last pluck time per string (performance.now() seconds) for the string glow.
 const lastPluck: number[] = new Array<number>(STRING_COUNT).fill(Number.NEGATIVE_INFINITY);
 
@@ -273,7 +307,7 @@ window.addEventListener("keydown", (e) => {
   e.preventDefault(); // no page scroll / button activation on Space
   keyboardUsed = true;
   if (action.kind === "chord") keyboardChord(action.root, action.quality);
-  else keyboardStrum(action.direction);
+  else keyboardStrum(action.direction, e.timeStamp);
 });
 
 // Once the keyboard has been used, the camera-error panel shrinks to a notice.
@@ -291,14 +325,22 @@ function keyboardChord(root: ChordLetter, quality: number): void {
   }
 }
 
-/** A synthetic strum from the keyboard: commit + rake across all six strings. */
-function keyboardStrum(direction: "down" | "up"): void {
+/**
+ * A synthetic strum from the keyboard: commit + rake across all six strings.
+ * `detectMs` is the key event's timestamp (the "detection" for latency).
+ */
+function keyboardStrum(direction: "down" | "up", detectMs = performance.now()): void {
   if (!engineReady) return;
+  const voicesBefore = audioEngine?.stats.voicesStarted ?? 0;
+  const ctxAtDetect = audioEngine?.clock().currentTime ?? 0;
   strumBoundary();
   const t = performance.now() / 1000;
   for (const step of rakeSchedule(direction)) {
     audioEngine?.pluck(step.string, step.velocity, false, step.delay);
     lastPluck[step.string] = t + step.delay;
+  }
+  if ((audioEngine?.stats.voicesStarted ?? 0) > voicesBefore) {
+    recordLatency("keyboard", detectMs, null, ctxAtDetect);
   }
 }
 
@@ -376,6 +418,15 @@ initEngine()
 startWebcam()
   .then((handle) => {
     webcam = handle;
+    // Track each frame's camera capture time for end-to-end latency (7.2).
+    const video = handle.video;
+    if (typeof video.requestVideoFrameCallback === "function") {
+      const onFrame = (_now: number, meta: VideoFrameCallbackMetadata): void => {
+        frameCaptureMs = meta.captureTime ?? null;
+        if (!disposed) video.requestVideoFrameCallback(onFrame);
+      };
+      video.requestVideoFrameCallback(onFrame);
+    }
     // Load MediaPipe in the background. If its WASM/model can't load (e.g.
     // offline), we keep showing the feed without an overlay rather than failing.
     createHandTracker()
@@ -549,6 +600,7 @@ function render(): void {
     warningMonitor.reset();
   }
   drawWarningBanners(ctx, width, height, warnings, settings.leftHanded);
+  if (SHOW_LATENCY) drawLatencyReadout(ctx, height);
 
   // Calibration overlay + sampling (task 6.1), on top of everything.
   if (calibrationSession) {
@@ -664,9 +716,12 @@ function processStrum(
   // chord in Power mode, the latched hex chord otherwise (tasks 3.5/4.3). In
   // Power mode the voicing only has the 2–3 power-chord strings non-zero, so the
   // plucks below on any other string are silent: that's the strum restriction.
+  const detectMs = performance.now();
+  const voicesBefore = audioEngine?.stats.voicesStarted ?? 0;
+  const ctxAtDetect = audioEngine?.clock().currentTime ?? 0;
   if (events.length > 0 && !gesture.suppressPlucks) strumBoundary();
 
-  const now = performance.now() / 1000;
+  const now = detectMs / 1000;
   for (const ev of events) {
     const index = ev.string_index;
     const velocity = ev.velocity;
@@ -674,6 +729,9 @@ function processStrum(
     if (gesture.suppressPlucks) continue;
     audioEngine?.pluck(index, velocity, gesture.muted);
     if (index >= 0 && index < STRING_COUNT) lastPluck[index] = now;
+  }
+  if ((audioEngine?.stats.voicesStarted ?? 0) > voicesBefore) {
+    recordLatency("hand", detectMs, frameCaptureMs, ctxAtDetect);
   }
 }
 
@@ -865,6 +923,31 @@ function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
   };
 }
 
+/** Live latency readout for `?latency` (task 7.2), bottom-left. */
+function drawLatencyReadout(ctx: CanvasRenderingContext2D, height: number): void {
+  const r = latencyLog.report();
+  const fmt = (label: string, s: LatencySummary | null): string =>
+    s ? `${label} p50 ${s.p50.toFixed(0)} / p95 ${s.p95.toFixed(0)} ms` : `${label} —`;
+  const lines = [
+    `${fmt("strum→sound", r.strum)}${r.strum ? ` (${latencyVerdict(r.strum.p95)})` : ""}`,
+    fmt("camera→sound", r.endToEnd),
+    `${fmt("processing", r.processing)} · n=${latencyLog.samples().length}`,
+  ];
+  const size = Math.max(11, Math.round(height * 0.018));
+  ctx.save();
+  ctx.font = `500 ${size}px ui-monospace, monospace`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
+  const h = lines.length * size * 1.4 + 12;
+  const y = height - h - 12;
+  ctx.fillStyle = "rgba(14, 18, 24, 0.82)";
+  ctx.fillRect(12, y, w, h);
+  ctx.fillStyle = "#e8eaed";
+  lines.forEach((l, i) => ctx.fillText(l, 20, y + 6 + i * size * 1.4));
+  ctx.restore();
+}
+
 /**
  * A strum boundary (hand crossing frame or keyboard strum): commit the pending
  * chord to the sounding chord, then load whichever voicing this strum should
@@ -906,7 +989,10 @@ function applySoundingVoicing(): void {
  */
 declare global {
   interface Window {
-    __strhapshody?: { state(): Record<string, unknown> };
+    __strhapshody?: {
+      state(): Record<string, unknown>;
+      latency(): ReturnType<LatencyLog["report"]> & { count: number };
+    };
   }
 }
 window.__strhapshody = {
@@ -926,6 +1012,7 @@ window.__strhapshody = {
     calibrating: calibrationSession !== null,
     leftHanded: settings.leftHanded,
   }),
+  latency: () => ({ ...latencyLog.report(), count: latencyLog.samples().length }),
 };
 
 requestAnimationFrame(render);

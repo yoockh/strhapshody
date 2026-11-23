@@ -858,3 +858,24 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   reload; unload regression. **Mutation check:** reverting the unload fix makes that test fail with
   "null pointer passed to rust". `npm run test` 253, `cargo test` 140, typecheck 0.
 - next: 7.2 latency harness, 7.3 README.
+
+## 2026-11-23 18:00 WIB — task 7.2 latency measurement harness
+
+- did: (ADR-0023) pure `src/latency.ts` (`LatencySample`, `audibleMs` via getOutputTimestamp with a
+  base+output-latency fallback, `strumLatencyMs`, `processingMs`, `endToEndLatencyMs`, nearest-rank
+  `summarize`, `latencyVerdict`, `LatencyLog` ring buffer). Audio engine `clock()` now includes
+  `getOutputTimestamp()`. `main.ts` records a sample at every strum boundary (keyboard: key event
+  `timeStamp`; hand: detection time + the frame's camera `captureTime` from `requestVideoFrameCallback`),
+  exposes `__strhapshody.latency()`, and draws a live readout with `?latency`. New harness
+  `e2e/latency.spec.ts` (60 strums, C/G/Am/F cycle) → console summary + `test-results/latency.json`,
+  fails if p95 ≥ 100 ms.
+- **measured (headless Chromium 157, fake audio device: baseLatency 10 ms, outputLatency 32 ms):**
+  - strum → sound: **p50 37.3 ms · p95 45.0 ms · max 48.2 ms** (n=60) → *ideal* (< 60 ms).
+  - JS processing (key event → voices scheduled): p50 11.3 ms · p95 22.9 ms · max 32.4 ms.
+  - Karplus-Strong render + AudioBuffer fill for a 6-string strum, measured separately: p50 10.6 ms ·
+    p95 15.0 ms — i.e. nearly all of the processing time. Optimisation candidate (next commit).
+  - camera → sound: not measurable here (no camera). Expected budget on real hardware: the above +
+    frame wait (≤ 33 ms at 30 fps) + MediaPipe inference (~10–30 ms) + up to one rAF ≈ 80–110 ms, i.e.
+    right at the 100 ms target → **needs human verification** with `?latency`.
+- tested: `npm run test` 264 passed (+11 latency), e2e 7 passed (incl. the harness), typecheck 0,
+  `cargo test` 140.
