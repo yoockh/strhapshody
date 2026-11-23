@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   acousticPluckParams,
+  BRIGHTNESS_STEP,
   DEFAULT_VOLUME,
+  pluckCacheKey,
+  quantizeBrightness,
   driveCompensation,
   MAX_MASTER_GAIN,
   reverbMix,
@@ -227,5 +230,28 @@ describe("reverbMix", () => {
     expect(reverbMix(5)).toEqual(reverbMix(1));
     const n = reverbMix(Number.NaN);
     expect(Number.isFinite(n.dry) && Number.isFinite(n.wet)).toBe(true);
+  });
+});
+
+describe("pluck buffer cache keys", () => {
+  it("quantises brightness to the step and clamps", () => {
+    expect(quantizeBrightness(0.62)).toBeCloseTo(0.6, 10);
+    expect(quantizeBrightness(0.63)).toBeCloseTo(0.65, 10);
+    expect(quantizeBrightness(2)).toBe(1);
+    expect(quantizeBrightness(-1)).toBe(0);
+    expect(quantizeBrightness(Number.NaN)).toBeCloseTo(0.5, 10);
+    expect(BRIGHTNESS_STEP).toBeLessThanOrEqual(0.05);
+  });
+  it("equal notes/params/variant share a key; anything audible differs", () => {
+    const p = acousticPluckParams(110, 1500);
+    const k = pluckCacheKey(110, p, 48000, 0);
+    expect(pluckCacheKey(110, { ...p, brightness: p.brightness + 0.01 }, 48000, 0)).toBe(
+      pluckCacheKey(110, { ...p, brightness: quantizeBrightness(p.brightness + 0.01) }, 48000, 0),
+    );
+    expect(pluckCacheKey(110, p, 48000, 1)).not.toBe(k); // variant
+    expect(pluckCacheKey(110.5, p, 48000, 0)).not.toBe(k); // pitch
+    expect(pluckCacheKey(110, acousticPluckParams(110, 1500, true), 48000, 0)).not.toBe(k); // muted
+    expect(pluckCacheKey(110, pluckParams("distortion", 110, 1500), 48000, 0)).not.toBe(k);
+    expect(pluckCacheKey(110, p, 44100, 0)).not.toBe(k); // sample rate
   });
 });

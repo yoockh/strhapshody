@@ -31,6 +31,7 @@
  */
 
 import { TEST_CHORD_FREQUENCIES } from "./notes.ts";
+import { LruCache } from "./lru.ts";
 
 /** Tunables for the strum-velocity → gain mapping. */
 export interface VelocityGainOptions {
@@ -205,6 +206,41 @@ export const DEFAULT_TONE = 0.65;
  * drive in [0, 1] → `Float32Array` for `WaveShaperNode.curve`.
  */
 export type CurveGenerator = (samples: number, drive: number) => Float32Array;
+
+/** Brightness quantisation step for cached pluck buffers (inaudible at 0.05). */
+export const BRIGHTNESS_STEP = 0.05;
+/** Seed variants per cached note, rotated so repeat strums aren't identical. */
+export const PLUCK_VARIANTS = 3;
+/** Rendered buffers kept (~0.6 MB each at 3.5 s / 44.1 kHz → ≤ ~45 MB). */
+export const PLUCK_CACHE_SIZE = 72;
+
+/** Brightness snapped to `BRIGHTNESS_STEP` (and clamped to [0,1]). */
+export function quantizeBrightness(b: number): number {
+  const v = Number.isFinite(b) ? Math.min(1, Math.max(0, b)) : 0.5;
+  return Math.round(v / BRIGHTNESS_STEP) * BRIGHTNESS_STEP;
+}
+
+/**
+ * Cache key for a rendered pluck: the note (to 0.01 Hz), its Karplus-Strong
+ * parameters (brightness quantised) and the seed variant. Equal keys ⇒ the
+ * engine would render the same samples, so the buffer can be reused — the
+ * render (~2 ms per string) dominated strum processing time (DEVLOG 7.2).
+ */
+export function pluckCacheKey(
+  freq: number,
+  p: AcousticPluckParams,
+  sampleRate: number,
+  variant: number,
+): string {
+  return [
+    freq.toFixed(2),
+    p.t60.toFixed(3),
+    p.duration.toFixed(3),
+    quantizeBrightness(p.brightness).toFixed(2),
+    sampleRate,
+    variant,
+  ].join("|");
+}
 
 /** Master gain at full volume. Default volume 0.8 → 0.35 (the old fixed level). */
 export const MAX_MASTER_GAIN = 0.55;
@@ -459,7 +495,9 @@ export function createAudioEngine(): AudioEngine {
   const voices: (Voice | null)[] = chord.map(() => null);
   let closed = false;
   let renderPluck: PluckRenderer | null = null;
-  let seed = 1;
+  // Rendered pluck buffers, reused across strums (see pluckCacheKey).
+  const pluckCache = new LruCache<string, AudioBuffer>(PLUCK_CACHE_SIZE);
+  let variant = 0;
 
   function stopVoice(index: number): void {
     const v = voices[index];
@@ -488,16 +526,28 @@ export function createAudioEngine(): AudioEngine {
   ): AudioScheduledSourceNode | null {
     if (!renderPluck) return null;
     const p = pluckParams(instrument, freq, velocity, muted);
-    let samples: Float32Array;
-    try {
-      seed = (seed + 1) >>> 0 || 1;
-      samples = renderPluck(freq, ctx.sampleRate, p.duration, p.t60, p.brightness, seed);
-    } catch {
-      return null;
+    variant = (variant + 1) % PLUCK_VARIANTS;
+    const key = pluckCacheKey(freq, p, ctx.sampleRate, variant);
+    let buffer = pluckCache.get(key);
+    if (!buffer) {
+      let samples: Float32Array;
+      try {
+        samples = renderPluck(
+          freq,
+          ctx.sampleRate,
+          p.duration,
+          p.t60,
+          quantizeBrightness(p.brightness),
+          variant + 1, // seed: one per variant, so each variant is stable
+        );
+      } catch {
+        return null;
+      }
+      if (samples.length === 0) return null;
+      buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate);
+      buffer.getChannelData(0).set(samples);
+      pluckCache.set(key, buffer);
     }
-    if (samples.length === 0) return null;
-    const buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate);
-    buffer.getChannelData(0).set(samples);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     gain.gain.setValueAtTime(peak, now);
@@ -551,6 +601,7 @@ export function createAudioEngine(): AudioEngine {
 
     setPluckRenderer(render: PluckRenderer | null): void {
       renderPluck = render;
+      pluckCache.clear();
     },
 
     pluck(index: number, velocity: number, muted = false, delay = 0): void {

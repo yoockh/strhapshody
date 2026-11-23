@@ -58,20 +58,29 @@ function usableTimestamp(ts: LatencySample["outputTimestamp"]): ts is {
 }
 
 /**
- * Performance-clock time (ms) at which the first voice is heard. Via the
- * output timestamp when usable, else scheduling delay + reported latency.
- * Never earlier than `scheduledMs` (a voice can't sound before it exists).
+ * Performance-clock time (ms) at which the first voice is heard: the later of
+ *
+ * - its audio-clock start mapped through the output timestamp (when usable),
+ *   which accounts for device buffering, and
+ * - the moment scheduling finished plus the reported base + output latency.
+ *
+ * The second bound matters because the voice's start time is read from
+ * `currentTime` when the strum is detected: if the JS work then takes longer
+ * than the audio thread's lead, that start is already in the past when the
+ * command reaches the audio thread, and the voice actually begins on the next
+ * render quantum — after the processing, not before it. Taking the max makes
+ * processing time count instead of hiding it (DEVLOG 7.2 follow-up).
  */
 export function audibleMs(s: LatencySample): number {
-  let t: number;
+  const reported = Number.isFinite(s.reportedLatency) ? Math.max(0, s.reportedLatency) : 0;
+  const ahead = Math.max(0, s.voiceCtxTime - s.ctxTimeAtSchedule);
+  const afterScheduling = s.scheduledMs + (ahead + reported) * 1000;
   if (usableTimestamp(s.outputTimestamp)) {
-    t = s.outputTimestamp.performanceTime + (s.voiceCtxTime - s.outputTimestamp.contextTime) * 1000;
-  } else {
-    const ahead = Math.max(0, s.voiceCtxTime - s.ctxTimeAtSchedule);
-    const reported = Number.isFinite(s.reportedLatency) ? Math.max(0, s.reportedLatency) : 0;
-    t = s.scheduledMs + (ahead + reported) * 1000;
+    const mapped =
+      s.outputTimestamp.performanceTime + (s.voiceCtxTime - s.outputTimestamp.contextTime) * 1000;
+    return Math.max(mapped, afterScheduling);
   }
-  return Math.max(t, s.scheduledMs);
+  return afterScheduling;
 }
 
 /** Detection → audible, ms (the part this app controls, plus device output). */

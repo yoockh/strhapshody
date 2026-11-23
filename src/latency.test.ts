@@ -23,9 +23,18 @@ const base: LatencySample = {
 
 describe("audibleMs", () => {
   it("maps the voice's audio-clock time through the output timestamp", () => {
-    // voice is 20 ms of audio-clock after the sample presented at 1005 ms
-    expect(audibleMs(base)).toBeCloseTo(1025, 6);
-    expect(strumLatencyMs(base)).toBeCloseTo(25, 6);
+    // voice is 20 ms of audio-clock after the sample presented at 1005 ms;
+    // scheduling ended at 1002 + 10 ms reported latency = 1012 (earlier).
+    const s = { ...base, reportedLatency: 0.01 };
+    expect(audibleMs(s)).toBeCloseTo(1025, 6);
+    expect(strumLatencyMs(s)).toBeCloseTo(25, 6);
+  });
+  it("counts processing that outlasts the audio thread's lead", () => {
+    // JS took 30 ms: the detect-time start is long past; the voice can only
+    // start after scheduling (1030) + reported latency (30 ms).
+    const s = { ...base, scheduledMs: 1030 };
+    expect(audibleMs(s)).toBeCloseTo(1060, 6);
+    expect(strumLatencyMs(s)).toBeCloseTo(60, 6);
   });
   it("falls back to scheduling delay + reported latency without a timestamp", () => {
     const s = { ...base, outputTimestamp: null, voiceCtxTime: 10.012 };
@@ -35,9 +44,9 @@ describe("audibleMs", () => {
     const s = { ...base, outputTimestamp: { contextTime: 0, performanceTime: 0 } };
     expect(audibleMs(s)).toBeCloseTo(1002 + 30, 6);
   });
-  it("is never before the voices were scheduled", () => {
+  it("is never before scheduling finished plus the reported latency", () => {
     const s = { ...base, outputTimestamp: { contextTime: 20, performanceTime: 1001 } };
-    expect(audibleMs(s)).toBe(1002);
+    expect(audibleMs(s)).toBeCloseTo(1032, 6);
   });
   it("ignores a non-finite reported latency in the fallback", () => {
     const s = { ...base, outputTimestamp: null, reportedLatency: Number.NaN };
@@ -52,7 +61,8 @@ describe("processing and end-to-end", () => {
   });
   it("end-to-end needs a capture time", () => {
     expect(endToEndLatencyMs(base)).toBeNull();
-    expect(endToEndLatencyMs({ ...base, source: "hand", captureMs: 950 })).toBeCloseTo(75, 6);
+    // audible = max(1025 mapped, 1002 + 30) = 1032
+    expect(endToEndLatencyMs({ ...base, source: "hand", captureMs: 950 })).toBeCloseTo(82, 6);
   });
 });
 

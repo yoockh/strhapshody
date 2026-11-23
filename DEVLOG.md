@@ -879,3 +879,25 @@ optionalDependencies and both build and dev server work. If a future esbuild err
     right at the 100 ms target → **needs human verification** with `?latency`.
 - tested: `npm run test` 264 passed (+11 latency), e2e 7 passed (incl. the harness), typecheck 0,
   `cargo test` 140.
+
+## 2026-11-23 18:25 WIB — perf: cache rendered pluck buffers; fix: latency estimator under-counted processing
+
+- found: the 7.2 estimator took the first voice's start from `currentTime` read at detection. When the JS
+  work (mostly the Karplus-Strong render) outlasts the audio thread's lead, that start is already past
+  when the command arrives and the voice really begins on the next quantum — so processing time was
+  partly hidden (the cache below cut processing by ~10 ms yet "strum→sound" barely moved, which exposed
+  it). `audibleMs` now takes the later of the output-timestamp mapping and *scheduling finished +
+  reported base/output latency* (new unit test for the processing-dominated case). **The 7.2 entry's
+  p50 37 / p95 45 ms figures were optimistic**; corrected numbers below.
+- did: `src/lru.ts` (generic LRU, tested) + an AudioBuffer cache in the audio engine keyed by
+  `pluckCacheKey` (pitch, T60, duration, brightness snapped to 0.05 — `quantizeBrightness` — sample rate,
+  seed variant); 3 seed variants rotate so repeat strums aren't sample-identical; capacity 72 (≤ ~45 MB).
+  Cache cleared when the renderer changes.
+- measured (headless Chromium 157, fake device: base 10 ms + output 32 ms, 60 keyboard strums, corrected
+  estimator):
+  - cache disabled: strum→sound **p50 53.2 · p95 60.0 · max 61.6 ms**; processing p50 11.2 · p95 18.0 ms.
+  - cache on: strum→sound **p50 43.1 · p95 50.5 · max 54.5 ms** (ideal < 60); processing p50 1.1 · p95
+    8.5 ms (the p95 is the first strum of each new chord, which still renders).
+  - About 42 ms of the remaining figure is the (fake) device's reported base + output latency; real
+    hardware will differ. Camera → sound still needs a real camera (`?latency`).
+- tested: `npm run test` 271 passed (+6 lru, +2 cache keys, +1 latency), e2e 7 passed, typecheck 0.
