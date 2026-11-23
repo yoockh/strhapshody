@@ -67,7 +67,10 @@ export interface AudioEngine {
   readonly running: boolean;
   /**
    * Replace the sounding note set — one frequency (Hz) per string, top→bottom.
-   * Future chord-change wiring (task 3.4) calls this on a strum boundary.
+   * Called on a strum boundary when the sounding voicing changes. A
+   * non-positive frequency marks a string as not sounded (it is damped now and
+   * ignored by `pluck`), which is how power chords restrict the strum to 2–3
+   * strings (task 4.3).
    */
   setChord(frequencies: readonly number[]): void;
   /**
@@ -141,6 +144,14 @@ export function createAudioEngine(): AudioEngine {
 
     setChord(frequencies: readonly number[]): void {
       chord = frequencies.slice(0, voices.length).map((f) => f);
+      // A string the new voicing doesn't sound (muted in the chord shape, or
+      // outside a power chord's 2–3 strings) is damped, like a guitarist's
+      // fretting hand muting it on the change — otherwise a low E left ringing
+      // from the previous chord would bleed under e.g. a C or an A5.
+      for (let i = 0; i < voices.length; i++) {
+        const f = chord[i];
+        if (f === undefined || !Number.isFinite(f) || f <= 0) stopVoice(i);
+      }
     },
 
     pluck(index: number, velocity: number): void {

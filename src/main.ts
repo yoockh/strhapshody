@@ -47,8 +47,8 @@ import {
   rectContains,
   type PlayMode,
 } from "./powerstrip.ts";
-import { chordLabel } from "./chord.ts";
-import { chordFrequencies } from "./chords.ts";
+import { NO_CHORD_LABEL } from "./chord.ts";
+import { powerChordLabel, selectVoicing, type PowerSelection } from "./voicing.ts";
 import { createAudioEngine, type AudioEngine } from "./audio.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
@@ -139,19 +139,32 @@ let fingerCount: FingerCountDetectorInstance | null = null;
 let chordLatch: ChordLatchInstance | null = null;
 const FINGER_COUNT_HOLD_FRAMES = 3;
 
-// Power-chord strip + mode state (task 4.2). A horizontal strip above the hex
-// flower (ADR-0013): when the left-hand cursor is over it the app is in Power
-// mode, when it returns to the hex area it's back in Chord mode (the neutral gap
-// between holds the current mode, for hysteresis). The sounding behaviour of
-// Power mode — restricting the strum to the root/fifth/octave strings and the
-// "G5 (fret 3, low E)" status readout — is task 4.3; this task is the UI + the
-// mode switch only. The strip is rebuilt when the left-zone geometry changes.
+// Power-chord strip + mode state (tasks 4.2/4.3). A horizontal strip above the
+// hex flower (ADR-0013): when the left-hand cursor is over it the app is in
+// Power mode, when it returns to the hex area it's back in Chord mode (the
+// neutral gap between holds the current mode, for hysteresis). The strip is
+// rebuilt when the left-zone geometry changes.
 let powerStrip: PowerStripInstance | null = null;
 let powerGeometry = "";
 let powerMarkerXs: number[] = [];
 let playMode: PlayMode = "Chord";
 // Highest selectable fret (PRD §7: "0 to 12").
 const POWER_STRIP_MAX_FRET = 12;
+// The hovered power chord (task 4.3): the last valid fret + string set under the
+// cursor while on the strip. Held when the cursor drifts into the gap (mode is
+// held too) so a strum there still sounds the last power chord. Like the hex
+// chord it only *sounds* on the next strum boundary (see processStrum).
+let pendingPower: PowerSelection | null = null;
+// Whether power chords add the octave as a third string (PRD §7 "optionally";
+// on by default for a fuller sound — exposed as a setting in Phase 6.2).
+const POWER_CHORD_OCTAVE = true;
+
+// The voicing currently loaded in the audio engine (task 4.3): its identity key
+// (so a strum only reloads the engine when the voicing actually changes, e.g.
+// Power→Chord with an unchanged latched chord still swaps the note set back)
+// and its status-bar label ("Am", "G5 (fret 3, low E)").
+let soundingKey = "";
+let soundingLabel = NO_CHORD_LABEL;
 
 try {
   audioEngine = createAudioEngine();
@@ -330,11 +343,13 @@ function processStrum(
 
   // A strum boundary: commit the pending chord selection to the sounding chord
   // *before* the voices fire, so the strum that armed the change also sounds it
-  // (task 3.4). Committing once per crossing frame is a no-op when the selection
-  // hasn't moved. When the committed chord actually changes, load its six-string
-  // note set into the audio engine (task 3.5) so this strum plays the new chord.
-  if (events.length > 0 && chordLatch?.commit()) {
-    applyCommittedChord();
+  // (task 3.4), then load whichever voicing this strum should play — the power
+  // chord in Power mode, the latched hex chord otherwise (tasks 3.5/4.3). In
+  // Power mode the voicing only has the 2–3 power-chord strings non-zero, so the
+  // plucks below on any other string are silent: that's the strum restriction.
+  if (events.length > 0) {
+    chordLatch?.commit();
+    applySoundingVoicing();
   }
 
   for (const ev of events) {
@@ -477,12 +492,21 @@ function processChord(
   drawHexFlower(ctx, cells, hexMap.radius(), activeIndex, cursor);
 
   // The power strip above the flower, accented + showing the hovered fret column
-  // when in Power mode (the restricted strum + note readout are task 4.3).
+  // and a preview of the power chord the next strum will sound (task 4.3).
   let activeFret = -1;
   let activePair = -1;
   if (playMode === "Power" && cursor) {
     activeFret = powerStrip.fretAtX(cursor.x);
     activePair = powerStrip.pairAtY(cursor.y);
+    // Hold the last valid hover (gap / off-strip frames keep it, task 4.3).
+    if (activeFret >= 0 && activePair >= 0) {
+      pendingPower = {
+        fret: activeFret,
+        rootString: powerStrip.rootString(activePair),
+        fifthString: powerStrip.fifthString(activePair),
+        octaveString: powerStrip.octaveString(activePair),
+      };
+    }
   }
   drawPowerStrip(
     ctx,
@@ -490,14 +514,17 @@ function processChord(
     playMode === "Power",
     activeFret,
     activePair,
+    playMode === "Power" && pendingPower
+      ? powerChordLabel(pendingPower.fret, pendingPower.rootString)
+      : null,
   );
 }
 
 /**
  * Build the status-bar model for this frame. Chord reflects the *sounding*
- * (committed) chord from the latch — root letter + quality suffix, e.g. `C`,
- * `Cm`, `C7` — which only changes on a strum (task 3.4). Instrument is a
- * placeholder (Phase 5); tracking health reflects the real pipeline state.
+ * voicing — `C`, `Cm`, `C7`, or a power chord like `G5 (fret 3, low E)` — which
+ * only changes on a strum (tasks 3.4/4.3). Instrument is a placeholder
+ * (Phase 5); tracking health reflects the real pipeline state.
  */
 function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
   let tracking: string;
@@ -507,7 +534,7 @@ function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
   else tracking = trackingSummary(assignments).label;
 
   return {
-    chord: committedChordLabel(),
+    chord: soundingLabel,
     mode: playMode,
     instrument: "Acoustic",
     tracking,
@@ -515,32 +542,27 @@ function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
 }
 
 /**
- * The sounding chord's display label from the latch's committed selection: the
- * root cell's letter (via `HexMap.cellChord`) plus the quality suffix. Shows the
- * em-dash placeholder until the first chord has been strummed in.
+ * Load the voicing this strum should sound into the audio engine (tasks 3.5 /
+ * 4.3): the hovered power chord in Power mode, otherwise the latch's committed
+ * hex chord (root cell letter via `HexMap.cellChord` + quality). Only reloads
+ * when the voicing's identity changes, and updates the status-bar label. If
+ * nothing valid is selected yet the engine keeps its default open-string test
+ * chord rather than being silenced.
  */
-function committedChordLabel(): string {
-  if (!chordLatch || !hexMap) return chordLabel(null, 0);
+function applySoundingVoicing(): void {
+  if (!chordLatch || !hexMap) return;
   const root = chordLatch.committedRoot;
   const letter = root >= 0 && root < hexMap.cellCount() ? hexMap.cellChord(root) : null;
-  return chordLabel(letter, chordLatch.committedQuality);
-}
-
-/**
- * Load the latch's committed (sounding) chord into the audio engine's note set
- * (task 3.5). Maps the committed hex root cell to its chord letter
- * (`HexMap.cellChord`) and quality, resolves the fret-position table to six
- * per-string frequencies, and hands them to `setChord()`. Called on a strum
- * boundary after a chord *change* commits. If nothing valid is committed yet
- * (root < 0 — no cell ever hovered), the engine keeps its default open-string
- * test chord rather than being silenced.
- */
-function applyCommittedChord(): void {
-  if (!audioEngine || !chordLatch || !hexMap) return;
-  const root = chordLatch.committedRoot;
-  if (root < 0 || root >= hexMap.cellCount()) return;
-  const letter = hexMap.cellChord(root);
-  audioEngine.setChord(chordFrequencies(letter, chordLatch.committedQuality));
+  const voicing = selectVoicing(
+    playMode,
+    pendingPower,
+    { root: letter, quality: chordLatch.committedQuality },
+    POWER_CHORD_OCTAVE,
+  );
+  if (!voicing || voicing.key === soundingKey) return;
+  audioEngine?.setChord(voicing.frequencies);
+  soundingKey = voicing.key;
+  soundingLabel = voicing.label;
 }
 
 requestAnimationFrame(render);

@@ -645,3 +645,39 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   tested, geometry cargo-tested in 4.1, build/typecheck green) but not visually confirmed in this
   camera-less env. Belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist; the pipeline gets a
   deterministic exercise via the Playwright suite (7.1).
+
+## 2026-11-23 13:50 WIB — task 4.3 power-mode restricted strum + "G5 (fret 3, low E)" readout
+
+- environment (new cloud container, not Yaya's machine): fresh clone had no `wasm32-unknown-unknown`
+  target, no `wasm-pack`, no `node_modules`. Installed via `rustup target add`, `cargo install
+  wasm-pack`, `npm ci`. wasm-pack's own binaryen download from GitHub releases is blocked here, and
+  apt's binaryen 108 is **too old for wasm-bindgen 0.2.130**: the optimized wasm fails to instantiate in
+  Chromium (`WebAssembly.Table.set(): ... function-typed object`) even with explicit `--enable-*` feature
+  flags. Fix (env only, no repo change): `npm i -g binaryen@latest` (wasm-opt 132) — wasm-pack picks it
+  up from PATH and the engine inits fine. If a future session sees that error, check `wasm-opt
+  --version` first.
+- did: closed Phase 4 (ADR-0014). New pure `src/voicing.ts`: `powerVoicing(sel, withOctave)` builds a
+  six-string note set with only the root (open string + fret), fifth (+7) and optional octave (+12)
+  non-zero, on the string indices the engine's `powerstrip` returned — the other strings are 0 Hz, which
+  the audio engine already ignores, so that *is* the strum restriction; `powerChordLabel` → "G5 (fret 3,
+  low E)"; `chordVoicing` wraps the 3.5 chord table; `selectVoicing(mode, power, chord)` picks which one
+  a strum sounds; every voicing carries a `key` so the engine only reloads on an actual change. Added
+  `midiToPitchClass` to `notes.ts`. `main.ts`: Power mode now records a held `pendingPower` (last valid
+  fret + root/fifth/octave strings from `PowerStrip`), and on each strum frame commits the chord latch
+  then calls `applySoundingVoicing()` (replaces `applyCommittedChord`); the status-bar CHORD field shows
+  the sounding voicing label; the strip's caption previews the hovered power chord. `audio.ts`
+  `setChord()` now damps strings the new voicing doesn't sound (no low E bleeding under an A5/C).
+- tested: `cargo test` 106 passed / 0 failed; `npm run test` 14 files / 145 tests passed (+18 voicing
+  tests: PRD label example, sharp roots, G5 = G2/D3/G3 with the rest silent, exactly 2 strings without
+  octave, lower-pair C5, perfect-fifth + octave ratios at every fret on both pairs, pitch rises with fret,
+  key identity, invalid selections, select logic; +2 `midiToPitchClass`); `npm run typecheck` 0;
+  `npm run build` clean. **New: headless-Chromium smoke load** of `vite preview` with a fake camera —
+  the WASM engine initializes and the strip / hex flower / strings render; MediaPipe assets can't load
+  here (CDN blocked by the sandbox proxy), expected per ADR-0005.
+- next: Phase 5 — task 5.1 Karplus-Strong acoustic voice. Also noticed (not yet wired): the 2.3
+  palm-mute / fist-stop `GestureDetector` exists in the engine but isn't connected to audio in the render
+  loop; plan to wire it with 5.1 (palm mute = short damped Karplus-Strong decay, fist = `stopAll`).
+  Cosmetic: the centred "LEFT HAND · chords" zone caption overlaps the hex flower — fix in polish.
+- needs human verification: whether the power-chord strum feels "tight and heavy" (PRD §7), whether the
+  octave should default on, and that the strip preview / status label match what is heard — needs a real
+  camera + hands + speakers (Phase 7.3 checklist).

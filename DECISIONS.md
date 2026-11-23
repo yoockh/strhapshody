@@ -431,3 +431,35 @@ leaving), and draws fret markers at `fretMarkerX()`. Task 4.3 reads `fretAtX`/`p
 note name. Changing the default `max_fret`, the cell count, or adding mode-boundary hysteresis in the
 *frontend* is not an ADR change; only changing the equal-cell fret mapping, the midline split, the
 string-index/octave convention, or moving note-name math into the engine would supersede this.
+
+## ADR-0014: Power-mode strum restriction is a note-set property; power chords latch on the strum boundary too
+
+**Context:** task 4.3 makes Power mode actually sound: the right hand should strum only the 2 (optionally
+3 with octave) power-chord strings, and the status bar should read e.g. "G5 (fret 3, low E)" (PRD §7).
+Questions: (a) where the "only these strings" restriction lives; (b) when a newly hovered power chord
+starts sounding; (c) whether the octave is on; (d) what happens to strings left ringing from the previous
+voicing.
+
+**Decision:**
+1. **Restriction = silent strings in the voicing.** A pure TS module (`src/voicing.ts`) turns the power
+   selection into a six-string frequency array with `0` Hz on every string except root / fifth / octave.
+   The audio engine already treats a non-positive frequency as "don't sound" (ADR-0009), so the strum
+   detector and pluck path stay untouched — no mode branch in the hot path. Pitches are derived as note
+   math (root = open string + fret, fifth = +7, octave = +12, each placed on the string index the engine's
+   `powerstrip` returned), per ADR-0013 §4; nothing about tuning is hard-coded beyond `OPEN_STRING_MIDI`.
+2. **Same strum-boundary rule as chords (ADR-0012).** The hovered power chord is a *pending* selection
+   (last valid fret+pair, held through gap/off-strip frames); the engine's note set only changes on a strum
+   frame. `selectVoicing(mode, power, chord)` picks the power chord in Power mode, else the latched hex
+   chord; the frontend reloads the engine only when the voicing's identity `key` changes (so Power→Chord
+   with an unchanged latched chord still swaps the note set back). The latch itself is unchanged and still
+   commits on every crossing frame. The strip previews the hovered power chord name before it sounds; the
+   status bar shows the *sounding* voicing's label.
+3. **Octave on by default** (`POWER_CHORD_OCTAVE = true` in `main.ts`) for a fuller sound; it's the PRD's
+   "optional" third string and becomes a Phase 6.2 setting.
+4. **`setChord()` damps strings the new voicing doesn't sound**, as a guitarist's fretting hand would —
+   otherwise a low E ringing from a G chord would bleed under an A5 or a C (whose low E is muted).
+
+**Consequences:** the status bar's CHORD field now shows the last loaded voicing label (chord or power);
+`applyCommittedChord` in `main.ts` is replaced by `applySoundingVoicing`. Changing the octave default or
+the label format is not an ADR change; moving the restriction into the strum path or letting a power chord
+sound mid-ring would supersede this.

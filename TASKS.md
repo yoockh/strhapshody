@@ -56,7 +56,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       positions) and string-pair-from-height (upper = 6th+5th, lower = 5th+4th); unit tests.
 - [x] 4.2 Power Chord Strip UI above the hex grid; entering it switches to Power mode,
       returning to the hex area switches back to Chord mode.
-- [ ] 4.3 Power-mode strumming restricted to the 2 (optionally 3 with octave) relevant strings;
+- [x] 4.3 Power-mode strumming restricted to the 2 (optionally 3 with octave) relevant strings;
       status bar shows note name e.g. "G5 (fret 3, low E)".
 
 ## Phase 5 — Sound quality
