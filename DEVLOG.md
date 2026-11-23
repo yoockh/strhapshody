@@ -914,3 +914,27 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   `?latency` numbers to report back. Phase 7 / all MVP boxes complete.
 - tested: `cargo test` 140, `npm run test` 271, `npm run test:e2e` 7 (incl. latency harness), typecheck,
   build — all green. Fresh-clone check of the README steps: see next entry.
+
+## 2026-11-23 18:55 WIB — session wrap-up (cloud session: 4.3 → 7.3, MVP task list complete)
+
+- fresh-clone check: cloned the pushed branch into a scratch dir and followed the README literally —
+  `npm install`, `npm run build:engine`, `npm run build`, `npm run test:all` (140 + 271 green),
+  `vite preview` serves 200. The instructions work as written (given Node ≥ 22.12, rustup, the wasm32
+  target and wasm-pack).
+- this session: 4.3 power-mode strum + label; 5.1 Karplus-Strong voice; palm-mute/fist wiring (2.3
+  follow-up); 5.2 electric + distortion; 5.3 instrument/volume/reverb; unload use-after-free fix; 6.1
+  calibration; 6.2 settings; 6.3 warnings; 6.4 keyboard fallback; 7.1 Playwright e2e; 7.2 latency
+  harness (+ estimator fix and pluck-buffer cache); 7.3 README. ADR-0014 … ADR-0023.
+- state: every Phase 0–7 box in TASKS.md is checked; `cargo test` 140, vitest 271, Playwright 7, all
+  green. Work is pushed to the session branch `ccr-40dc167e-kbawaf`, **not yet merged to `main`** — the
+  CLAUDE.md definition of done says `origin/main`; merging needs the owner's go-ahead (PR or direct).
+- environment notes for future cloud sessions: install `rustup target add wasm32-unknown-unknown`,
+  `cargo install wasm-pack`, and a recent binaryen (`npm i -g binaryen`) — apt's binaryen 108 produces a
+  wasm that fails to instantiate. The MediaPipe CDN is unreachable from the sandbox, so live tracking can
+  only be checked on a real machine.
+- next: (1) Yaya runs the README manual checklist with a real webcam and reports results / `?latency`
+  numbers — then tune thresholds (gesture/finger-count, strum threshold, warning thresholds, smoothing)
+  from that feedback, and flip `DEFAULT_HANDEDNESS_ROLE` if the zones are swapped; (2) merge to `main`;
+  (3) post-MVP P.1 Tauri wrapper needs Yaya to run `sudo pacman -S webkit2gtk-4.1 libappindicator-gtk3
+  librsvg patchelf` first; P.2 stretch items.
+- needs human verification: everything in the README "Manual test checklist".
