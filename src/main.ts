@@ -76,6 +76,14 @@ import {
   type PlayZones,
 } from "./calibration.ts";
 import { browserStorage, loadJSON, saveJSON } from "./storage.ts";
+import {
+  drawWarningBanners,
+  meanLuma,
+  nearFrameEdge,
+  WarningMonitor,
+  type TrackingSample,
+  type WarningKind,
+} from "./warnings.ts";
 import { modeLabel, SHAPE_NEUTRAL, strumGestureAction } from "./strumgesture.ts";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
@@ -336,6 +344,54 @@ startWebcam()
     console.warn("[strhapshody] camera unavailable:", err);
   });
 
+// Tracking-health warnings (task 6.3): frame brightness is sampled from a tiny
+// offscreen copy of the video every LUMA_EVERY frames; the monitor debounces
+// dark / low-confidence / missing-hand / edge-of-frame conditions.
+const warningMonitor = new WarningMonitor();
+const LUMA_EVERY = 15;
+let lumaCanvas: CanvasRenderingContext2D | null = null;
+let frameLuma: number | null = null;
+let frameCount = 0;
+
+/** Mean luminance of the current camera frame (0..1), or null on failure. */
+function sampleLuma(video: HTMLVideoElement): number | null {
+  try {
+    if (!lumaCanvas) {
+      const c = document.createElement("canvas");
+      c.width = 32;
+      c.height = 18;
+      lumaCanvas = c.getContext("2d", { willReadFrequently: true });
+    }
+    if (!lumaCanvas || video.videoWidth === 0) return null;
+    lumaCanvas.drawImage(video, 0, 0, 32, 18);
+    return meanLuma(lumaCanvas.getImageData(0, 0, 32, 18).data);
+  } catch {
+    return null;
+  }
+}
+
+/** This frame's tracking signals for the warning monitor. */
+function trackingSample(
+  assignments: AssignedHand[],
+  width: number,
+  height: number,
+): TrackingSample {
+  const hands: TrackingSample["hands"][number][] = [];
+  if (webcam && latestHands && width > 0 && height > 0) {
+    const { videoWidth, videoHeight } = webcam.video;
+    for (const a of assignments) {
+      const lm = latestHands.landmarks[a.index];
+      if (!lm) continue;
+      const pts = lm.map((p) => {
+        const c = landmarkToCanvas(p, videoWidth, videoHeight, width, height, true);
+        return { x: c.x / width, y: c.y / height };
+      });
+      hands.push({ role: a.role, score: a.score, nearEdge: nearFrameEdge(pts) });
+    }
+  }
+  return { luma: frameLuma, hands };
+}
+
 // Set on page teardown: the wasm objects are freed then, so the render loop
 // must not run another frame against them ("null pointer passed to rust").
 let disposed = false;
@@ -352,6 +408,7 @@ function render(): void {
   // otherwise the static placeholder pattern.
   if (webcam) {
     stage.withMirroredFeed((c) => drawVideoCover(c, webcam!.video, width, height));
+    if (frameCount++ % LUMA_EVERY === 0) frameLuma = sampleLuma(webcam.video);
 
     // Run hand detection on this frame. Detection failures must never break
     // the render loop (they're caught and logged).
@@ -425,6 +482,19 @@ function render(): void {
   // — it only changes on a strum (task 3.4); the hovered-but-not-yet-strummed
   // cell is shown by the flower's accent. Instrument follows the audio engine (task 5.3).
   drawStatusBar(ctx, width, height, buildStatusModel(assignments));
+
+  // Tracking-health warnings (task 6.3): only meaningful while tracking runs
+  // and the player is actually playing (not mid-calibration).
+  let warnings: WarningKind[] = [];
+  if (webcam && handTracker && !calibrationSession) {
+    warnings = warningMonitor.update(
+      performance.now() / 1000,
+      trackingSample(assignments, width, height),
+    );
+  } else {
+    warningMonitor.reset();
+  }
+  drawWarningBanners(ctx, width, height, warnings, settings.leftHanded);
 
   // Calibration overlay + sampling (task 6.1), on top of everything.
   if (calibrationSession) {

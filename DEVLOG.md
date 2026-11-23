@@ -808,3 +808,19 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   size 0 shrinks the flower; settings JSON saved and restored after reload; no page errors.
 - needs human verification: default strum threshold (does it kill accidental plucks without eating soft
   strums?), smoothing range feel, left-handed play with real hands.
+
+## 2026-11-23 16:35 WIB — task 6.3 lighting / out-of-frame warning banners
+
+- did: new pure `src/warnings.ts` (ADR-0020): `rawConditions` (dark / lowConfidence / noHands /
+  chordMissing / strumMissing / chordEdge / strumEdge), `WarningMonitor` (1.0 s onset, 0.6 s release,
+  priority order), `warningMessage` (handedness-aware hand names), `meanLuma` (Rec.601), `nearFrameEdge`,
+  plus canvas `drawWarningBanners` (≤ 2 amber pills, bottom-centre). `main.ts` samples frame luma every
+  15 frames from a 32×18 offscreen canvas, maps each hand's landmarks through the cover-crop+mirror to test
+  edge proximity, runs the monitor while tracking is live (reset during calibration), draws banners.
+- tested: `npm run test` 242 passed (+17: conditions incl. noHands suppressing "missing", monitor onset /
+  no single-frame flash / release without flicker / priority / reset, messages, luma maths, edge test).
+  typecheck 0, build clean, `cargo test` 140 unchanged. Browser: banners rendered on a test canvas and
+  reviewed; `meanLuma` on real canvas pixel data (rgb 20,20,20 → 0.078, i.e. "dark"); full app runs
+  with the luma sampler and shows no page errors.
+- needs human verification: whether 0.15 luma / 0.55 score match "too dark" on a real webcam (auto-
+  exposure varies a lot), and whether the edge banner fires at a sensible point.

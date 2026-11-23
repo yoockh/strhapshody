@@ -74,7 +74,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       zones to match.
 - [x] 6.2 Settings panel: handedness swap, sensitivity sliders (strum threshold, smoothing,
       hex size), persisted in localStorage.
-- [ ] 6.3 Lighting-too-dark / hand-out-of-frame warning banners driven by MediaPipe tracking
+- [x] 6.3 Lighting-too-dark / hand-out-of-frame warning banners driven by MediaPipe tracking
       confidence + frame presence.
 - [ ] 6.4 Keyboard fallback: letter keys A–G select chord, shift toggles major/minor, spacebar
       strums down, shift+spacebar strums up. Doubles as a debug/demo mode without a camera.

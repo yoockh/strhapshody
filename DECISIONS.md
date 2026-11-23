@@ -606,3 +606,25 @@ sound-control persistence (0017) to this task.
 **Consequences:** changing a setting re-seeds what it affects (smoothing rebuilds the cursor filters;
 handedness resets every per-hand detector). Retuning mapping constants is not an ADR change; storing
 engine units or dropping the field-wise merge would supersede this.
+
+## ADR-0020: Tracking warnings — frame luma + MediaPipe scores + edge proximity, debounced with onset/release
+
+**Context:** task 6.3 — "lighting too dark" and "hand out of frame" banners driven by MediaPipe tracking
+confidence and frame presence. HandLandmarker reports no per-hand presence score in its result, only the
+handedness category score; brightness has to be measured separately.
+
+**Decision:**
+1. **Signals:** mean Rec.601 luma of the camera frame (drawn into a 32×18 offscreen canvas every 15 frames
+   — negligible cost) below 0.15 → `dark`; mean handedness score of the hands in view below 0.55 →
+   `lowConfidence` (the best confidence proxy the API gives); no hands → `noHands`; one role missing →
+   `chordMissing`/`strumMissing`; any landmark within 2% of the *visible canvas* edge (after the cover
+   crop, i.e. what the player sees) → `chordEdge`/`strumEdge`. "No hands" suppresses the two "missing"
+   warnings so one problem gives one banner.
+2. **Debounce:** a condition must hold 1.0 s to show and be clear 0.6 s to hide (`WarningMonitor`), so a
+   single bad frame never flashes a banner and a borderline one doesn't flicker. Fixed priority order
+   (dark > lowConfidence > noHands > missing > edge); at most two banners, bottom-centre.
+3. **Only while playing:** the monitor runs once tracking is live and is reset during calibration (whose
+   own overlay already tells the player where to put their hands).
+
+**Consequences:** thresholds are tuning (needs a real camera to pick well); adding a per-hand presence
+score if MediaPipe exposes one later would refine `lowConfidence` without changing this contract.
