@@ -1,6 +1,11 @@
 import "./style.css";
 import { createStage } from "./stage.ts";
-import { drawFeedPattern, drawZoneOverlay, drawErrorBanner } from "./placeholder.ts";
+import {
+  drawFeedPattern,
+  drawZoneOverlay,
+  drawErrorBanner,
+  drawNotice,
+} from "./placeholder.ts";
 import { startWebcam, describeCameraError, type WebcamHandle } from "./webcam.ts";
 import { drawVideoCover } from "./videoframe.ts";
 import { createHandTracker, type HandTracker } from "./handtracking.ts";
@@ -19,7 +24,8 @@ import {
   trackingSummary,
   type StatusBarModel,
 } from "./hud.ts";
-import { drawStrings, computeStringYs } from "./strings.ts";
+import { drawStrings, computeStringYs, stringGlow, STRING_COUNT } from "./strings.ts";
+import { KEYBOARD_HELP, keyAction, rakeSchedule, type ChordLetter } from "./keyboard.ts";
 import {
   initEngine,
   StrumDetector,
@@ -201,6 +207,8 @@ let pendingPower: PowerSelection | null = null;
 // and its status-bar label ("Am", "G5 (fret 3, low E)").
 let soundingKey = "";
 let soundingLabel = NO_CHORD_LABEL;
+// Last pluck time per string (performance.now() seconds) for the string glow.
+const lastPluck: number[] = new Array<number>(STRING_COUNT).fill(Number.NEGATIVE_INFINITY);
 
 // Calibration (task 6.1): each hand's comfortable range, persisted, which the
 // play zones are fitted to. Runs automatically on first use (no saved
@@ -254,6 +262,45 @@ function endCalibration(save: boolean): void {
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && calibrationSession) endCalibration(false);
 });
+
+// Keyboard fallback (task 6.4): A–G chord (Shift = minor), Space strum down,
+// Shift+Space up. Works with or without a camera; ignored while a slider or
+// checkbox has focus.
+window.addEventListener("keydown", (e) => {
+  if (e.target instanceof HTMLInputElement) return;
+  const action = keyAction(e);
+  if (!action) return;
+  e.preventDefault(); // no page scroll / button activation on Space
+  keyboardUsed = true;
+  if (action.kind === "chord") keyboardChord(action.root, action.quality);
+  else keyboardStrum(action.direction);
+});
+
+// Once the keyboard has been used, the camera-error panel shrinks to a notice.
+let keyboardUsed = false;
+
+/** Select a chord from the keyboard: it becomes the pending chord (ADR-0012). */
+function keyboardChord(root: ChordLetter, quality: number): void {
+  if (!hexMap || !chordLatch) return; // engine not ready yet
+  for (let i = 0; i < hexMap.cellCount(); i++) {
+    if (hexMap.cellChord(i) === root) {
+      chordLatch.setPending(i, quality);
+      playMode = "Chord";
+      return;
+    }
+  }
+}
+
+/** A synthetic strum from the keyboard: commit + rake across all six strings. */
+function keyboardStrum(direction: "down" | "up"): void {
+  if (!engineReady) return;
+  strumBoundary();
+  const t = performance.now() / 1000;
+  for (const step of rakeSchedule(direction)) {
+    audioEngine?.pluck(step.string, step.velocity, false, step.delay);
+    lastPluck[step.string] = t + step.delay;
+  }
+}
 
 try {
   audioEngine = createAudioEngine();
@@ -449,7 +496,14 @@ function render(): void {
   if (!autoCalibrationOffered && webcam && handTracker) startCalibration();
 
   // Six virtual strings across the right (strum) zone (PRD §8 / task 2.1).
-  drawStrings(ctx, zones.strum.left, zones.strum.right, zones.strum.top, zones.strum.bottom);
+  drawStrings(
+    ctx,
+    zones.strum.left,
+    zones.strum.right,
+    zones.strum.top,
+    zones.strum.bottom,
+    stringGlow(lastPluck, performance.now() / 1000),
+  );
 
   // Chord flower in the left zone (task 3.2): draw the 7-cell hex flower, track
   // the left hand's smoothed palm cursor, highlight the hovered cell, and feed
@@ -508,8 +562,16 @@ function render(): void {
   }
 
   // Graceful error path: permission denied, no device, camera in use, etc.
-  if (cameraError) {
-    drawErrorBanner(ctx, width, height, "Camera unavailable", cameraError);
+  if (cameraError && keyboardUsed) {
+    drawNotice(ctx, width, height, "Camera unavailable — keyboard mode");
+  } else if (cameraError) {
+    drawErrorBanner(
+      ctx,
+      width,
+      height,
+      "Camera unavailable",
+      `${cameraError} You can still play with the keyboard — ${KEYBOARD_HELP}.`,
+    );
   }
 
   requestAnimationFrame(render);
@@ -602,16 +664,16 @@ function processStrum(
   // chord in Power mode, the latched hex chord otherwise (tasks 3.5/4.3). In
   // Power mode the voicing only has the 2–3 power-chord strings non-zero, so the
   // plucks below on any other string are silent: that's the strum restriction.
-  if (events.length > 0 && !gesture.suppressPlucks) {
-    chordLatch?.commit();
-    applySoundingVoicing();
-  }
+  if (events.length > 0 && !gesture.suppressPlucks) strumBoundary();
 
+  const now = performance.now() / 1000;
   for (const ev of events) {
     const index = ev.string_index;
     const velocity = ev.velocity;
     ev.free();
-    if (!gesture.suppressPlucks) audioEngine?.pluck(index, velocity, gesture.muted);
+    if (gesture.suppressPlucks) continue;
+    audioEngine?.pluck(index, velocity, gesture.muted);
+    if (index >= 0 && index < STRING_COUNT) lastPluck[index] = now;
   }
 }
 
@@ -731,6 +793,9 @@ function processChord(
     cursorFilterX.reset();
     cursorFilterY.reset();
     fingerCount.reset();
+    // Show the pending (next-strum) chord on the flower — e.g. one picked from
+    // the keyboard (task 6.4) — when no hand is hovering.
+    activeIndex = chordLatch.pendingRoot;
   }
 
   // Mode switch (task 4.2): cursor on the strip → Power, in the hex area →
@@ -798,6 +863,16 @@ function buildStatusModel(assignments: AssignedHand[]): StatusBarModel {
     instrument: audioEngine ? INSTRUMENT_LABELS[audioEngine.instrument] : "no audio",
     tracking,
   };
+}
+
+/**
+ * A strum boundary (hand crossing frame or keyboard strum): commit the pending
+ * chord to the sounding chord, then load whichever voicing this strum should
+ * play, *before* any voice fires (ADR-0012 / ADR-0014).
+ */
+function strumBoundary(): void {
+  chordLatch?.commit();
+  applySoundingVoicing();
 }
 
 /**

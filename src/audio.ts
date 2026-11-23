@@ -274,11 +274,13 @@ export interface AudioEngine {
   setPluckRenderer(render: PluckRenderer | null): void;
   /**
    * Pluck string `index` (0 = top = low E) at the given strum `velocity`
-   * (px/s); `muted` plays it palm-muted (short, dark). Re-triggering a string
-   * stops its previous voice first, like a real string that can only ring one
-   * note at a time. Out-of-range indices are ignored.
+   * (px/s); `muted` plays it palm-muted (short, dark); `delay` (seconds,
+   * default 0) schedules it on the audio clock, for sample-accurate rakes
+   * (keyboard strum, task 6.4). Re-triggering a string stops its previous
+   * voice first, like a real string that can only ring one note at a time.
+   * Out-of-range indices are ignored.
    */
-  pluck(index: number, velocity: number, muted?: boolean): void;
+  pluck(index: number, velocity: number, muted?: boolean, delay?: number): void;
   /** Silence every ringing string immediately (fist-stop). */
   stopAll(): void;
   /** Switch instrument (new plucks use its voice; routing crossfades). */
@@ -524,7 +526,7 @@ export function createAudioEngine(): AudioEngine {
       renderPluck = render;
     },
 
-    pluck(index: number, velocity: number, muted = false): void {
+    pluck(index: number, velocity: number, muted = false, delay = 0): void {
       if (closed) return;
       if (!Number.isInteger(index) || index < 0 || index >= voices.length) {
         return;
@@ -535,7 +537,7 @@ export function createAudioEngine(): AudioEngine {
       // Retrigger: stop whatever was ringing on this string.
       stopVoice(index);
 
-      const now = ctx.currentTime;
+      const now = ctx.currentTime + (Number.isFinite(delay) && delay > 0 ? delay : 0);
       const gain = ctx.createGain();
       const peak = velocityToGain(velocity);
       const source = karplusStrongSource(freq, velocity, muted, peak, gain, now)

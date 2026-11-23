@@ -824,3 +824,21 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   with the luma sampler and shows no page errors.
 - needs human verification: whether 0.15 luma / 0.55 score match "too dark" on a real webcam (auto-
   exposure varies a lot), and whether the edge banner fires at a sensible point.
+
+## 2026-11-23 17:00 WIB — task 6.4 keyboard fallback (camera-free demo/debug mode)
+
+- did: new pure `src/keyboard.ts` (ADR-0021): `keyAction` (A–G major, Shift+letter minor, Space down,
+  Shift+Space up; ignores modifiers/repeat/other keys), `rakeSchedule` (6 strings, 12 ms apart, lighter
+  upstroke), `KEYBOARD_HELP`. `audio.ts` `pluck()` gains a `delay` (scheduled on the audio clock).
+  `strings.ts`: `drawStrings(…, glow)` + pure `stringGlow`. `main.ts`: keydown listener (skipped while an
+  input has focus), `keyboardChord` → latch pending + Chord mode, `keyboardStrum` → shared
+  `strumBoundary()` + rake; hand strums now also use `strumBoundary()` and feed the glow; flower shows the
+  pending chord when no hand is on it; camera-error panel lists the keys and collapses to a notice
+  (`drawNotice`) after the first key. Settings section shows the key help.
+- tested: `npm run test` 253 passed (+11: key mapping incl. modifiers/repeat/collisions, rake order /
+  timing / upstroke velocity, glow fade). typecheck 0, build clean, `cargo test` 140 unchanged.
+  Browser: with fake camera `C` + Space → status CHORD "C", strings glow, C cell highlighted; with the
+  camera denied → error panel with key help, `Shift+A` + Space → "Am", panel shrinks to a notice; no
+  page errors. Phase 6 complete.
+- next: Phase 7 — 7.1 Playwright e2e (C–G–Am–F via keyboard, assert audio), 7.2 latency harness,
+  7.3 README.

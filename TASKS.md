@@ -76,7 +76,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       hex size), persisted in localStorage.
 - [x] 6.3 Lighting-too-dark / hand-out-of-frame warning banners driven by MediaPipe tracking
       confidence + frame presence.
-- [ ] 6.4 Keyboard fallback: letter keys A–G select chord, shift toggles major/minor, spacebar
+- [x] 6.4 Keyboard fallback: letter keys A–G select chord, shift toggles major/minor, spacebar
       strums down, shift+spacebar strums up. Doubles as a debug/demo mode without a camera.
 
 ## Phase 7 — Testing & polish pass

@@ -126,3 +126,11 @@ body {
   right: auto;
   left: 12px;
 }
+
+#controls .hint {
+  margin: 0;
+  max-width: 290px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(232, 234, 237, 0.55);
+}

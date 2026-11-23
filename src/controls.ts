@@ -17,6 +17,7 @@
 
 import { INSTRUMENT_LABELS, INSTRUMENTS, type Instrument } from "./audio.ts";
 import { DEFAULT_SETTINGS, type Settings } from "./settings.ts";
+import { KEYBOARD_HELP } from "./keyboard.ts";
 
 /** The instrument after `current` in toggle order (wraps around). */
 export function nextInstrument(current: Instrument): Instrument {
@@ -196,6 +197,10 @@ export function mountControls(parent: HTMLElement, binding: ControlsBinding): Co
     reset.blur();
   });
   section.append(reset);
+  const help = document.createElement("p");
+  help.className = "hint";
+  help.textContent = KEYBOARD_HELP;
+  section.append(help);
   panel.append(section);
   toggle.addEventListener("click", () => {
     section.hidden = !section.hidden;

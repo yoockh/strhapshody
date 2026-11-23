@@ -628,3 +628,26 @@ handedness category score; brightness has to be measured separately.
 
 **Consequences:** thresholds are tuning (needs a real camera to pick well); adding a per-hand presence
 score if MediaPipe exposes one later would refine `lowConfidence` without changing this contract.
+
+## ADR-0021: Keyboard fallback feeds the same latch/voicing path; Shift is held (not a toggle) for minor
+
+**Context:** task 6.4 — A–G select chord, Shift toggles major/minor, Space strums down, Shift+Space up;
+doubles as a debug/demo mode without a camera and as the e2e driver for 7.1.
+
+**Decision:**
+1. **Shift held = minor** (`Shift+A` = Am), not a sticky toggle: Shift is also the upstroke modifier, so a
+   toggle would flip quality on every upstroke. Ctrl/Meta/Alt chords and key auto-repeat are ignored
+   (holding Space must not machine-gun; browser shortcuts keep working). The 1/2/3/I instrument keys don't
+   collide.
+2. **Same pipeline as the hands:** a letter sets the chord latch's *pending* chord (ADR-0012) and switches
+   to Chord mode; Space calls the shared `strumBoundary()` (commit + `applySoundingVoicing`, ADR-0014)
+   and then rakes all six strings — top→bottom down, bottom→top up, 12 ms apart, upstroke at 0.75×
+   velocity (PRD §8) — scheduled on the AudioContext clock via a new `pluck(…, delay)` argument, so the
+   rake is sample-accurate rather than setTimeout-jittered. A hand on the flower still overrides the
+   keyboard's pending chord.
+3. **Demo feedback:** strings glow briefly when plucked (hand or keyboard; pure `stringGlow`); with no
+   hand on the flower it highlights the pending chord cell; the camera-error panel names the keys and
+   shrinks to a one-line notice once the keyboard is used.
+
+**Consequences:** the keyboard path is the deterministic way to exercise chord → voicing → audio without
+a camera (task 7.1). A dominant-7th key or a sticky minor mode would be additions, not a contract change.

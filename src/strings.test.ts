@@ -5,6 +5,7 @@ import {
   computeStringYs,
   stringWidth,
 } from "./strings.ts";
+import { stringGlow } from "./strings.ts";
 
 /**
  * Unit tests for the pure virtual-string geometry (task 2.1 / PRD §8). The
@@ -101,5 +102,20 @@ describe("stringWidth", () => {
 
   it("returns the max width for a single string", () => {
     expect(stringWidth(0, 1, 3.25, 1)).toBeCloseTo(3.25, 6);
+  });
+});
+
+describe("stringGlow", () => {
+  it("is 1 at the pluck and fades linearly to 0", () => {
+    expect(stringGlow([10], 10)).toEqual([1]);
+    expect(stringGlow([10], 10.125)[0]).toBeCloseTo(0.5, 10);
+    expect(stringGlow([10], 10.3)).toEqual([0]);
+  });
+  it("never-plucked and future-scheduled strings", () => {
+    expect(stringGlow([Number.NEGATIVE_INFINITY], 5)).toEqual([0]);
+    expect(stringGlow([5.02], 5)).toEqual([1]);
+  });
+  it("degenerate fade gives no glow", () => {
+    expect(stringGlow([1], 1, 0)).toEqual([0]);
   });
 });

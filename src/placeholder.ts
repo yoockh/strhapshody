@@ -192,3 +192,34 @@ function roundedRect(
   ctx.arcTo(x, y, x + w, y, radius);
   ctx.closePath();
 }
+
+/**
+ * A compact one-line notice pill, top-centre just under the zone labels — the
+ * shrunk form of the camera error once the player is using the keyboard
+ * fallback (task 6.4), so it no longer covers the hex flower. (DOM glue.)
+ */
+export function drawNotice(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  text: string,
+): void {
+  const fontSize = Math.max(11, Math.round(height * 0.02));
+  ctx.save();
+  ctx.font = `600 ${fontSize}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const h = fontSize * 1.9;
+  const w = Math.min(width - 24, ctx.measureText(text).width + fontSize * 2);
+  const y = statusBarHeight(height) + Math.max(10, height * 0.025) + fontSize * 1.4;
+  ctx.fillStyle = "rgba(60, 14, 14, 0.85)";
+  ctx.strokeStyle = "rgba(240, 120, 120, 0.8)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect((width - w) / 2, y, w, h, h / 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#f5c4c4";
+  ctx.fillText(text, width / 2, y + h / 2, w - fontSize);
+  ctx.restore();
+}
