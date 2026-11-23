@@ -463,3 +463,33 @@ voicing.
 `applyCommittedChord` in `main.ts` is replaced by `applySoundingVoicing`. Changing the octave default or
 the label format is not an ADR change; moving the restriction into the strum path or letting a power chord
 sound mid-ring would supersede this.
+
+## ADR-0015: Acoustic voice = Karplus-Strong rendered to a buffer in the Rust engine, injected into the audio engine
+
+**Context:** task 5.1 replaces the placeholder triangle-oscillator pluck with a real acoustic guitar voice.
+TASKS.md names Karplus-Strong as the pragmatic choice (no sample licensing, testable by inspecting the
+output buffer). Questions: (a) where the DSP runs — Rust/WASM, TS, or an AudioWorklet; (b) how it reaches
+Web Audio; (c) how per-note parameters are chosen.
+
+**Decision:**
+1. **Rust `pluck` module renders a whole note to a `Vec<f32>`** (`renderPluck(freq, sampleRate, duration,
+   t60, brightness, seed) → Float32Array`). Extended KS: seeded lowpassed noise burst, two-point-average
+   loop filter with loss `ρ = 10^(−3/(t60·f))`, and a first-order allpass for fractional-delay tuning.
+   Being a pure function it is `cargo test`-ed on the samples: pitch within 1 cent across E2–E5 (measured
+   < 0.11 cent), T60 decay, palm-mute thud, brightness tilt, boundedness, DC, determinism, sanitisation.
+   An AudioWorklet was rejected for now: real-time streaming adds a second wasm instance in the worklet
+   scope and a message protocol, for no audible gain on a 6-voice instrument; rendering a ≤3.5 s note is
+   sub-millisecond in wasm.
+2. **Played as an `AudioBufferSourceNode` per pluck**, through the existing per-voice gain → master bus,
+   so retrigger/`stopAll`/damping from ADR-0009/0014 work unchanged. The renderer is **injected**
+   (`audioEngine.setPluckRenderer(renderPluck)` after `initEngine()`), so `audio.ts` stays wasm-free and
+   node-importable, and the instrument is playable before the wasm loads (oscillator fallback, also used
+   if a render throws or returns empty).
+3. **Per-note parameters are pure TS** (`acousticPluckParams`): T60 ∝ 1/√f clamped to [1.2, 6] s (~5 s on
+   low E, ~2.6 s on high e); brightness from strum velocity (harder = brighter); render length capped at
+   3.5 s (fade built into the buffer); palm-muted = T60 0.18 s, half brightness. Each pluck gets a new
+   seed so repeated strums aren't sample-identical.
+
+**Consequences:** the electric voice (5.2) reuses the same KS source and adds a waveshaper/tone chain after
+the voices. Retuning T60/brightness constants is feel-tuning, not an ADR change; moving synthesis into an
+AudioWorklet or to samples would supersede this.

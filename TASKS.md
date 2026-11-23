@@ -61,7 +61,7 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
 
 ## Phase 5 — Sound quality
 
-- [ ] 5.1 Acoustic instrument voice (Karplus-Strong plucked-string model is the pragmatic
+- [x] 5.1 Acoustic instrument voice (Karplus-Strong plucked-string model is the pragmatic
       choice — no sample licensing, genuinely testable by inspecting the output buffer).
 - [ ] 5.2 Electric clean + distortion voice: Web Audio `WaveShaperNode` driven by a Rust/WASM
       curve generator with a drive parameter, plus a basic tone control (lowpass/shelf).

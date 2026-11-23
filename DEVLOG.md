@@ -681,3 +681,24 @@ optionalDependencies and both build and dev server work. If a future esbuild err
 - needs human verification: whether the power-chord strum feels "tight and heavy" (PRD §7), whether the
   octave should default on, and that the strip preview / status label match what is heard — needs a real
   camera + hands + speakers (Phase 7.3 checklist).
+
+## 2026-11-23 14:05 WIB — task 5.1 Karplus-Strong acoustic voice
+
+- did: new Rust engine module `engine/src/pluck.rs` (ADR-0015): extended Karplus-Strong — seeded
+  xorshift noise burst lowpassed by `brightness`, DC-removed + peak-normalised; two-point-average loop
+  filter × loss `ρ = 10^(−3/(t60·f))`; first-order allpass for fractional-delay tuning (δ kept in
+  [0.1,1.1)); output peak-normalised with a 10 ms tail fade. Exported as `renderPluck(...) →
+  Float32Array`. `audio.ts`: voices are now `AudioBufferSourceNode`s playing the rendered buffer through
+  the per-voice gain; renderer injected via `setPluckRenderer` (main.ts installs `renderPluck` once the
+  engine inits); triangle-oscillator fallback before then / on render failure. New pure
+  `acousticPluckParams(freq, velocity, muted)` (ring time by pitch, brightness by velocity, palm-mute
+  params) — `pluck()` takes an optional `muted` flag, ready for the gesture wiring.
+- tested: `cargo test` 118 passed / 0 failed (+12 pluck: length, **pitch < 1 cent** at E2/A2/D3/G3/B3/E4/E5
+  via autocorrelation — measured errors 0.01–0.11 cent, bounded/finite/peak 1, T60 decay band, short-T60
+  thud, silent tail, brightness tilt, determinism + seed-0 remap, no DC, unrenderable → empty, bad params
+  sanitised, wasm export = core). `npm run test` 151 passed (+6 `acousticPluckParams`). typecheck 0,
+  build clean, headless smoke load OK (engine inits, renders).
+- next: wire the 2.3 palm-mute / fist-stop `GestureDetector` into the strum path (small follow-up
+  commit), then task 5.2 electric clean + distortion (Rust waveshaper curve + tone control).
+- needs human verification: whether the KS acoustic voice *sounds* like a guitar on real speakers, the
+  ring-time/brightness feel, and loudness balance across strings — no audio output in this env.

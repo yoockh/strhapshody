@@ -32,6 +32,7 @@ export {
   ChordQuality,
 } from "../engine/pkg/engine.js";
 export { PowerStrip, PowerPair } from "../engine/pkg/engine.js";
+export { renderPluck } from "../engine/pkg/engine.js";
 
 let ready: Promise<void> | null = null;
 

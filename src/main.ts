@@ -28,6 +28,7 @@ import {
   FingerCountDetector,
   ChordLatch,
   PowerStrip,
+  renderPluck,
   type StrumDetectorInstance,
   type HexMapInstance,
   type OneEuroFilterInstance,
@@ -186,6 +187,8 @@ window.addEventListener("keydown", resumeAudioOnce);
 initEngine()
   .then(() => {
     engineReady = true;
+    // Swap the placeholder oscillator for the Karplus-Strong voice (task 5.1).
+    audioEngine?.setPluckRenderer(renderPluck);
   })
   .catch((err: unknown) => {
     console.warn("[strhapshody] engine init failed:", err);
