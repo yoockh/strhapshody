@@ -979,3 +979,23 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   `cargo test` 140 unchanged.
 - needs human verification: rerun calibration with real hands — do the new prompts make the motion
   clear, and are the 12% / 15% thresholds lenient enough for small natural movements?
+
+## 2026-11-24 10:30 WIB — feat: in-app "How to play" guide before first calibration
+
+- why: on the first real-webcam run the maintainer didn't know where to put their hands — the app had
+  no in-app explanation, which is also how the resting-hand calibration (previous entry) happened.
+- did: new `src/help.ts` — pure `helpSections(leftHanded)` (position: arm's length, both hands at
+  shoulder height, palms to camera, mirror; chord hand: hover a hex, 1/2/3 fingers = major/minor/7th
+  with the little finger down, strip for power chords; strum hand: palm centre must cross the lines,
+  strum with a relaxed half-closed hand because a flat open palm is palm mute, faster = louder, fist =
+  stop; tips: chord changes on the next strum, calibration, keyboard) + DOM `mountHelp` modal with
+  "Start calibration" / "Got it". It opens on first visit (flag `strhapshody.help-seen.v1`), and
+  first-run calibration now waits until it's closed; "Start calibration" queues calibration if tracking
+  isn't live yet (`calibrationPending`). Reopen with H / ? or the new panel button; Esc closes; keyboard
+  play is ignored while it's open. README: first-run flow, hand-position note, H key, Reset calibration,
+  troubleshooting for squeezed zones and silent strums; badge counts updated.
+- tested: `npm run test` 280 passed (+4 help content incl. handedness swap and palm-mute warning);
+  e2e 9 passed (+1: guide on first visit, blocks keyboard play, Esc closes, remembered after reload,
+  reopens with H and the panel button; other tests pre-mark it seen). Guide reviewed at 1280×720 and
+  1024×640. `cargo test` 140.
+- needs human verification: does the guide answer "how do I hold my hands?" for a first-time player?

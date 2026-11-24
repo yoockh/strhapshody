@@ -59,6 +59,8 @@ export interface ControlsBinding {
   onChange(patch: Partial<Settings>): void;
   /** Rerun calibration (task 6.1); omit to hide the button. */
   onCalibrate?: () => void;
+  /** Open the "How to play" guide; omit to hide the button. */
+  onHelp?: () => void;
   /** Forget the saved calibration (zones back to the defaults). */
   onResetCalibration?: () => void;
 }
@@ -179,6 +181,19 @@ export function mountControls(parent: HTMLElement, binding: ControlsBinding): Co
   toggle.setAttribute("aria-expanded", "false");
   toggle.setAttribute("aria-controls", "settings-section");
   actions.append(toggle);
+  if (binding.onHelp) {
+    const onHelp = binding.onHelp;
+    const helpBtn = document.createElement("button");
+    helpBtn.type = "button";
+    helpBtn.className = "help-button";
+    helpBtn.textContent = "How to play";
+    helpBtn.title = "How to play (H)";
+    helpBtn.addEventListener("click", () => {
+      onHelp();
+      helpBtn.blur();
+    });
+    actions.append(helpBtn);
+  }
   panel.append(actions);
 
   // Collapsible settings section.

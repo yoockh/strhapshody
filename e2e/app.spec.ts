@@ -49,6 +49,13 @@ async function playChord(page: Page, letter: string, minor = false): Promise<voi
 
 const midiHz = (midi: number): number => 440 * Math.pow(2, (midi - 69) / 12);
 
+// Most tests skip the first-run "How to play" guide (it's modal); the guide
+// itself has its own test below, which opts back in.
+test.beforeEach(async ({ page }, info) => {
+  if (info.title.startsWith("first visit")) return;
+  await page.addInitScript(() => localStorage.setItem("strhapshody.help-seen.v1", "true"));
+});
+
 test("camera starts from the fake video device and the engine loads", async ({ page }) => {
   const errors = trackErrors(page);
   await openApp(page);
@@ -189,4 +196,34 @@ test("a resting-hand calibration is ignored; Reset calibration clears a good one
   await page.click("#controls .reset-calibration");
   expect(await page.evaluate(() => window.__strhapshody!.state().calibrated)).toBe(false);
   expect(await page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+});
+
+test("first visit shows the How to play guide; it closes, stays closed, and reopens with H", async ({
+  page,
+}) => {
+  const errors = trackErrors(page);
+  await openApp(page);
+  const guide = page.locator("#help");
+  await expect(guide).toBeVisible();
+  await expect(guide).toContainText("Left hand — pick the chord");
+  await expect(guide).toContainText("fully open flat palm means palm mute");
+
+  // Keyboard play is blocked while the guide is open…
+  await page.keyboard.press("c");
+  await page.keyboard.press("Escape");
+  await expect(guide).toBeHidden();
+  expect((await state(page)).sounding).toBe("—");
+
+  // …and the guide is remembered.
+  await page.reload();
+  await expect.poll(async () => (await state(page)).engineReady, { timeout: 15_000 }).toBe(true);
+  await expect(guide).toBeHidden();
+
+  await page.keyboard.press("h");
+  await expect(guide).toBeVisible();
+  await page.click("#help button:has-text('Got it')");
+  await expect(guide).toBeHidden();
+  await page.click("#controls .help-button");
+  await expect(guide).toBeVisible();
+  expect(errors).toEqual([]);
 });

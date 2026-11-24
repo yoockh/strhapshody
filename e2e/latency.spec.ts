@@ -30,6 +30,7 @@ type Summary = { n: number; p50: number; p95: number; max: number; mean: number 
 type Report = { strum: Summary; endToEnd: Summary; processing: Summary; count: number };
 
 test("strum → sound latency is within the PRD target", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("strhapshody.help-seen.v1", "true"));
   test.setTimeout(60_000);
   await page.goto("/");
   await expect

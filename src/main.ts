@@ -72,6 +72,7 @@ import {
   type Settings,
 } from "./settings.ts";
 import { mountControls } from "./controls.ts";
+import { HELP_SEEN_STORAGE_KEY, mountHelp } from "./help.ts";
 import {
   CALIBRATION_STORAGE_KEY,
   calibratedZones,
@@ -260,11 +261,21 @@ let calibration: Calibration | null = loadJSON(
   validateCalibration,
 );
 let calibrationSession: CalibrationSession | null = null;
+// Calibration was asked for (e.g. from the guide) before tracking was live.
+let calibrationPending = false;
+// Whether the "How to play" guide has been seen; first-run calibration waits
+// for it so the player knows what to do before being recorded.
+let helpSeen =
+  loadJSON(storage, HELP_SEEN_STORAGE_KEY, (v) => (v === true ? true : null)) ?? false;
 // First-run auto-start fires at most once per page load (so Esc sticks).
 let autoCalibrationOffered = calibration !== null;
 
 function startCalibration(): void {
-  if (!webcam || !handTracker) return; // needs live tracking
+  if (!webcam || !handTracker) {
+    calibrationPending = true; // starts once tracking is live
+    return;
+  }
+  calibrationPending = false;
   calibrationSession = new CalibrationSession(performance.now() / 1000);
   autoCalibrationOffered = true;
 }
@@ -301,7 +312,16 @@ window.addEventListener("keydown", (e) => {
 // Shift+Space up. Works with or without a camera; ignored while a slider or
 // checkbox has focus.
 window.addEventListener("keydown", (e) => {
+  // The guide is modal: only Esc (close) reaches it; buttons keep Space/Enter.
+  if (help.isOpen) {
+    if (e.key === "Escape") help.close();
+    return;
+  }
   if (e.target instanceof HTMLInputElement) return;
+  if ((e.key === "h" || e.key === "H" || e.key === "?") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (!calibrationSession) help.open(settings.leftHanded);
+    return;
+  }
   const action = keyAction(e);
   if (!action) return;
   e.preventDefault(); // no page scroll / button activation on Space
@@ -388,12 +408,28 @@ mountControls(document.body, {
   settings,
   onChange: applySettings,
   onCalibrate: () => startCalibration(),
+  onHelp: () => {
+    if (!calibrationSession) help.open(settings.leftHanded);
+  },
   onResetCalibration: () => {
     calibration = null;
     removeKey(storage, CALIBRATION_STORAGE_KEY);
     strumDetector?.reset();
   },
 });
+
+// "How to play" guide: opens on first use (before calibration) and from the
+// panel / H key. Closing it the first time marks it seen.
+const help = mountHelp(document.body, {
+  onStartCalibration: () => startCalibration(),
+  onClose: () => {
+    if (!helpSeen) {
+      helpSeen = true;
+      saveJSON(storage, HELP_SEEN_STORAGE_KEY, true);
+    }
+  },
+});
+if (!helpSeen) help.open(settings.leftHanded);
 
 // Resume audio on the first user interaction (pointer or key), once.
 function resumeAudioOnce(): void {
@@ -549,7 +585,10 @@ function render(): void {
   const zones = calibratedZones(calibration, width, height, barH, settings.leftHanded);
 
   // First-run calibration starts by itself once hand tracking is live.
-  if (!autoCalibrationOffered && webcam && handTracker) startCalibration();
+  if (calibrationPending && webcam && handTracker && !calibrationSession) startCalibration();
+  if (!autoCalibrationOffered && helpSeen && !help.isOpen && webcam && handTracker) {
+    startCalibration();
+  }
 
   // Six virtual strings across the right (strum) zone (PRD §8 / task 2.1).
   drawStrings(
@@ -1016,6 +1055,7 @@ window.__strhapshody = {
     clock: audioEngine?.clock() ?? null,
     calibrating: calibrationSession !== null,
     calibrated: calibration !== null,
+    helpOpen: help.isOpen,
     leftHanded: settings.leftHanded,
   }),
   latency: () => ({ ...latencyLog.report(), count: latencyLog.samples().length }),
