@@ -263,7 +263,7 @@ audio device): **p50 43 ms · p95 51 ms** — inside the PRD's "ideal" band (< 6
   it or install a newer one (`npm i -g binaryen`), then `npm run build:engine` again.
 - **Chord and strum zones feel swapped** — MediaPipe's left/right labels depend on mirroring; if your
   real left hand drives the strings, flip the two values of `DEFAULT_HANDEDNESS_ROLE` in
-  `src/handedness.ts` and tell us (it's on the checklist below). The *Left-handed* setting is for
+  `src/handedness.ts` and open an issue (it's on the checklist below). The *Left-handed* setting is for
   left-handed players, not for this.
 - **`npm install` warns that esbuild's postinstall script was blocked** — harmless; Vite still finds
   its esbuild binary.
@@ -291,9 +291,10 @@ audio device): **p50 43 ms · p95 51 ms** — inside the PRD's "ideal" band (< 6
 
 ## ✅ Manual test checklist
 
-For Yaya, with a real webcam. Run `npm run build:engine && npm run dev`, open
-`http://localhost:5173/?latency` in Chrome, sit at your normal distance in decent light. Tick what
-works; note anything odd (append to `DEVLOG.md` or just tell the next session).
+The parts automated tests can't cover — real hands, a real webcam, real speakers. Run
+`npm run build:engine && npm run dev`, open `http://localhost:5173/?latency` in Chrome, and sit at
+your normal distance in decent light. Tick what works and [open an issue](https://github.com/yoockh/strhapshody/issues)
+for anything that doesn't, including the `?latency` numbers.
 
 <details>
 <summary><b>Open the checklist</b></summary>
@@ -375,5 +376,5 @@ docs/images/       🖼️ README screenshot
 ```
 
 <div align="center">
-<sub>Made for one person who misses playing guitar and only has a laptop. 🎶</sub>
+<sub>No guitar, no installs, no servers — just a webcam and a browser. 🎶</sub>
 </div>

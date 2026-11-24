@@ -14,8 +14,7 @@ Append-only running log, newest entry at the bottom. One entry per work session.
 
 ## 2026-11-20 21:30 WIB — project setup (orchestrator session, not a build session)
 
-- did: paused all 5 standing crons per Yaya's request (focus limit on this project until done);
-  cloned empty `strhapshody` repo to `~/Documents/projects/strhapshody`; wrote `docs/PRD.md`,
+- did: cloned the empty `strhapshody` repo; wrote `docs/PRD.md`,
   `CLAUDE.md`, `TASKS.md`, `DECISIONS.md` (ADR-0001/0002/0003), this file, and `TESTING.md`;
   checked environment: no cargo/rustc, no passwordless sudo, no webkit2gtk-4.1 (blocks Tauri),
   node/npm already present; started `rustup` install in background (no sudo needed, user-local).
@@ -120,7 +119,7 @@ optionalDependencies and both build and dev server work. If a future esbuild err
 - needs human verification: the live mirrored feed, "cover" framing, and the permission-denied
   banner all need a real webcam + a real allow/deny prompt to eyeball — correct by construction
   (pure logic unit-tested, build + typecheck green) but not visually confirmed without a camera.
-  Belongs on the Phase 7.3 manual checklist for Yaya.
+  Belongs on the Phase 7.3 manual checklist for the maintainer.
 
 ## 2026-11-20 21:55 WIB — task 1.1 MediaPipe HandLandmarker + landmark overlay
 
@@ -359,7 +358,7 @@ optionalDependencies and both build and dev server work. If a future esbuild err
 - needs human verification: the actual *sound* can't be produced in this headless, audio-less env
   — whether a strum fires audible plucks at the right pitches, the placeholder timbre, the
   velocity→loudness feel, and that the palm-y→string-crossing mapping lines up on a real camera all
-  need Yaya's machine + hands + speakers. The strum→pluck pipeline is correct by construction (pure
+  need the maintainer's machine + hands + speakers. The strum→pluck pipeline is correct by construction (pure
   parts unit-tested, engine cargo-tested, build green) and gets a deterministic end-to-end exercise
   via the Playwright keyboard-fallback + Web-Audio-assertion suite in task 7.1. Belongs on the
   Phase 7.3 manual checklist. Also: this is the first real browser load of the engine wasm — the
@@ -556,7 +555,7 @@ optionalDependencies and both build and dev server work. If a future esbuild err
 - needs human verification: none for the pure logic (chord table + wiring fully tested, deterministic).
   Whether each chord *sounds* right through the placeholder triangle-osc timbre, whether the barre-shape
   voicings for C/F/G minor + B major sound as good as the open ones, and that strumming a hovered cell
-  audibly changes the chord on a real camera + speakers — need Yaya's machine; belongs on the Phase 7.3
+  audibly changes the chord on a real camera + speakers — need the maintainer's machine; belongs on the Phase 7.3
   manual checklist and gets a deterministic exercise via the Playwright keyboard-fallback + Web-Audio
   suite in task 7.1. Phase 3 is now complete; Phase 4 (power chords) is next.
 
@@ -648,7 +647,7 @@ optionalDependencies and both build and dev server work. If a future esbuild err
 
 ## 2026-11-23 13:50 WIB — task 4.3 power-mode restricted strum + "G5 (fret 3, low E)" readout
 
-- environment (new cloud container, not Yaya's machine): fresh clone had no `wasm32-unknown-unknown`
+- environment (new cloud container, not the maintainer's machine): fresh clone had no `wasm32-unknown-unknown`
   target, no `wasm-pack`, no `node_modules`. Installed via `rustup target add`, `cargo install
   wasm-pack`, `npm ci`. wasm-pack's own binaryen download from GitHub releases is blocked here, and
   apt's binaryen 108 is **too old for wasm-bindgen 0.2.130**: the optimized wasm fails to instantiate in
@@ -910,7 +909,7 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   build, test commands, troubleshooting (camera, MediaPipe offline, autoplay, the old-`wasm-opt`
   instantiate error found this session, swapped zones → `DEFAULT_HANDEDNESS_ROLE`, esbuild warning),
   known limitations (no human/camera testing yet, latency numbers, CDN, browsers, no Tauri), and a manual
-  test checklist for Yaya built from every "needs human verification" note in this log, ending with the
+  test checklist for the maintainer built from every "needs human verification" note in this log, ending with the
   `?latency` numbers to report back. Phase 7 / all MVP boxes complete.
 - tested: `cargo test` 140, `npm run test` 271, `npm run test:e2e` 7 (incl. latency harness), typecheck,
   build — all green. Fresh-clone check of the README steps: see next entry.
@@ -932,10 +931,10 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   `cargo install wasm-pack`, and a recent binaryen (`npm i -g binaryen`) — apt's binaryen 108 produces a
   wasm that fails to instantiate. The MediaPipe CDN is unreachable from the sandbox, so live tracking can
   only be checked on a real machine.
-- next: (1) Yaya runs the README manual checklist with a real webcam and reports results / `?latency`
+- next: (1) the maintainer runs the README manual checklist with a real webcam and reports results / `?latency`
   numbers — then tune thresholds (gesture/finger-count, strum threshold, warning thresholds, smoothing)
   from that feedback, and flip `DEFAULT_HANDEDNESS_ROLE` if the zones are swapped; (2) merge to `main`;
-  (3) post-MVP P.1 Tauri wrapper needs Yaya to run `sudo pacman -S webkit2gtk-4.1 libappindicator-gtk3
+  (3) post-MVP P.1 Tauri wrapper needs the maintainer to run `sudo pacman -S webkit2gtk-4.1 libappindicator-gtk3
   librsvg patchelf` first; P.2 stretch items.
 - needs human verification: everything in the README "Manual test checklist".
 
@@ -951,3 +950,11 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   Chromium (renders cleanly). shields.io is blocked from this sandbox, so the badge images themselves
   were not fetched here — they're standard static-badge URLs and render for GitHub visitors. Note the
   test-count badges are static and need updating if the counts change.
+
+## 2026-11-24 09:00 WIB — docs: neutral, professional wording for the public repo
+
+- did: removed personal names, pronouns and personal details (a private path, local scheduling notes)
+  from README, TESTING, TASKS, DECISIONS, PRD, CLAUDE.md and this log, replacing them with neutral roles
+  ("the maintainer", "the project owner") without changing any decision or meaning. README's checklist
+  now asks testers to open a GitHub issue; footer reworded. Earlier wording remains in git history.
+- tested: repo-wide scan finds no remaining personal references; `npm run test` 271 passed.
