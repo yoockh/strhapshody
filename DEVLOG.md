@@ -938,3 +938,16 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   (3) post-MVP P.1 Tauri wrapper needs Yaya to run `sudo pacman -S webkit2gtk-4.1 libappindicator-gtk3
   librsvg patchelf` first; P.2 stretch items.
 - needs human verification: everything in the README "Manual test checklist".
+
+## 2026-11-24 08:45 WIB — docs: README polish (badges, screenshot, diagram)
+
+- did: README restyled on request — centred header, tech-stack badges (TypeScript, Rust, WebAssembly,
+  Vite, MediaPipe, Web Audio, Vitest, Playwright) and status badges (test counts, latency, MVP, privacy,
+  browsers) via shields.io, a nav row, a hero screenshot (`docs/images/screenshot.png`, keyboard demo
+  after strumming C on Electric Dist, 2560×1440, ~250 KB), a features list, a tech-stack table, a Mermaid
+  architecture diagram, side-by-side hand tables, `<kbd>` keys, GitHub alert callouts, and collapsible
+  troubleshooting / manual-checklist sections. All previous content kept.
+- tested: every in-page anchor matches a heading; the Mermaid diagram was rendered with mermaid@11 in
+  Chromium (renders cleanly). shields.io is blocked from this sandbox, so the badge images themselves
+  were not fetched here — they're standard static-badge URLs and render for GitHub visitors. Note the
+  test-count badges are static and need updating if the counts change.
