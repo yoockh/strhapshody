@@ -18,8 +18,8 @@ Your webcam watches both hands — the left picks the chord, the right strums si
 [![Playwright](https://img.shields.io/badge/Playwright-1.63-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev/)
 
 [![cargo test](https://img.shields.io/badge/cargo_test-140_passing-brightgreen?style=flat-square&logo=rust)](engine/)
-[![vitest](https://img.shields.io/badge/vitest-271_passing-brightgreen?style=flat-square&logo=vitest&logoColor=white)](src/)
-[![e2e](https://img.shields.io/badge/e2e-7_passing-brightgreen?style=flat-square&logo=playwright&logoColor=white)](e2e/)
+[![vitest](https://img.shields.io/badge/vitest-280_passing-brightgreen?style=flat-square&logo=vitest&logoColor=white)](src/)
+[![e2e](https://img.shields.io/badge/e2e-9_passing-brightgreen?style=flat-square&logo=playwright&logoColor=white)](e2e/)
 [![latency](https://img.shields.io/badge/strum→sound-p95_51_ms-success?style=flat-square)](#-tests)
 [![status](https://img.shields.io/badge/status-MVP_complete-orange?style=flat-square)](TASKS.md)
 [![privacy](https://img.shields.io/badge/privacy-100%25_on--device-blueviolet?style=flat-square)](#-tech-stack)
@@ -107,9 +107,16 @@ The picture is mirrored like a mirror, so your left hand appears on the left.
 > The chord you hover only **sounds on your next strum** — moving the left hand never changes a
 > ringing chord, exactly like a real guitar.
 
-**🧭 First run:** a 20-second calibration starts by itself once both hands are visible. Follow the
-prompts (left hand roams its comfortable area, right hand strums its full range); the zones resize
-to your reach. Redo it any time with **Calibrate**, cancel with **Esc**.
+**🧭 First run:** a short **How to play** guide opens first (reopen it any time with <kbd>H</kbd> or the
+*How to play* button). When you close it, a 20-second calibration starts once both hands are visible:
+hold your left hand up and move it around, then sweep your right hand up and down in big strums — the
+zones resize to your reach. Redo it any time with **Calibrate**, cancel with **Esc**. If a hand barely
+moved, calibration keeps the default zone for it instead of shrinking it.
+
+> [!NOTE]
+> **Hand position:** sit about an arm's length from the laptop with both hands raised to shoulder height,
+> palms toward the camera. Strum with a relaxed, half-closed hand — a fully open flat palm is the
+> palm-mute gesture.
 
 **⌨️ Keyboard** — works with or without a camera, a full demo mode:
 
@@ -120,11 +127,13 @@ to your reach. Redo it any time with **Calibrate**, cancel with **Esc**.
 | <kbd>Space</kbd> / <kbd>Shift</kbd>+<kbd>Space</kbd> | Strum down / up |
 | <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> | Acoustic / Electric Clean / Electric Distortion |
 | <kbd>I</kbd> | Cycle instrument |
-| <kbd>Esc</kbd> | Cancel calibration |
+| <kbd>H</kbd> | Open the How to play guide |
+| <kbd>Esc</kbd> | Close the guide / cancel calibration |
 
-**🎛️ Panel (bottom corner):** instrument, volume, reverb, Calibrate, and **Settings** — left-handed mode
-(mirrors everything: chords with the right hand), power chords with/without the octave, strum
-threshold (ignore slow drifts), cursor smoothing, hex size, reset. Settings are saved in the browser.
+**🎛️ Panel (bottom corner):** instrument, volume, reverb, Calibrate, How to play, and **Settings** —
+left-handed mode (mirrors everything: chords with the right hand), power chords with/without the
+octave, strum threshold (ignore slow drifts), cursor smoothing, hex size, reset to defaults, reset
+calibration. Settings are saved in the browser.
 
 Add `?latency` to the URL (e.g. `http://localhost:5173/?latency`) for a live latency readout.
 
@@ -256,6 +265,12 @@ audio device): **p50 43 ms · p95 51 ms** — inside the PRD's "ideal" band (< 6
   apps using the webcam, reload. You can keep playing with the keyboard meanwhile.
 - **No hand skeleton appears** — MediaPipe couldn't download its model/runtime (offline or blocked
   network). The camera feed still shows; check the browser console for `hand tracking unavailable`.
+- **Strings or hexagons squeezed into a small area / a corner** — the saved calibration doesn't match
+  your reach (e.g. hands were resting while it recorded). Open **Settings → Reset calibration**, then
+  press **Calibrate** and move both hands freely while it runs.
+- **Nothing happens when strumming** — the middle of your palm has to cross the string lines; check
+  that TRACKING says "OK · both hands", and that you're not strumming with a flat open palm (palm mute)
+  or a fist (stop).
 - **No sound** — click or press a key once (browsers block audio until you interact), check the
   volume slider and system output.
 - **`engine init failed: … WebAssembly.Table.set() … function-typed object`** in the console — the

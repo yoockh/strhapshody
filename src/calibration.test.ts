@@ -5,7 +5,11 @@ import {
   MIN_SAMPLES,
   PHASE_SECONDS,
   calibrationPrompt,
+  MIN_CHORD_SPAN,
+  MIN_STRUM_SPAN,
   mirrorBox,
+  usableChordRange,
+  usableStrumRange,
   robustRange,
   validateCalibration,
   type Calibration,
@@ -278,5 +282,82 @@ describe("left-handed zones (task 6.2)", () => {
     expect(calibrationPrompt("chord", true)[1]).toContain("right hand");
     expect(calibrationPrompt("strum", true)[0]).toBe("Left hand");
     expect(calibrationPrompt("intro", true)[1]).toContain("right for chords");
+  });
+});
+
+// Regression (2026-11-24, first real-webcam run): hands resting near the bottom
+// of the frame during calibration produced tiny ranges, and the zones shrank
+// to their minimum size in the bottom corner (strings squeezed at the bottom).
+describe("calibration rejects ranges with too little movement", () => {
+  /** A hand jittering ±1% around a point. */
+  const resting = (x: number, y: number, n = 240) =>
+    Array.from({ length: n }, (_, i) => ({
+      x: x + 0.01 * Math.sin(i),
+      y: y + 0.01 * Math.cos(i * 1.3),
+    }));
+
+  it("a resting hand gives no usable range for either role", () => {
+    const s = new CalibrationSession(0);
+    const chord = resting(0.35, 0.92);
+    const strum = resting(0.6, 0.93);
+    let i = 0;
+    for (let f = 0; f < 21 * 30; f++, i++) {
+      s.update(f / 30, chord[i % chord.length]!, strum[i % strum.length]!);
+    }
+    const c = s.result();
+    expect(c.chord).toBeNull();
+    expect(c.strum).toBeNull();
+    expect(s.outcome()).toEqual({ chord: false, strum: false });
+    // …so the zones stay at their defaults instead of collapsing to a corner.
+    expect(calibratedZones(c, W, H, BAR)).toEqual(calibratedZones(null, W, H, BAR));
+  });
+
+  it("the done view reports the outcome and the prompt explains it", () => {
+    const s = new CalibrationSession(0);
+    const big = grid(0.1, 0.3, 0.4, 0.8, 16);
+    let i = 0;
+    let view = s.update(0, null, null);
+    for (let f = 0; f < 20 * 30; f++, i++) {
+      view = s.update(f / 30, big[i % big.length]!, { x: 0.7, y: 0.9 });
+    }
+    expect(view.phase).toBe("done");
+    expect(view.outcome).toEqual({ chord: true, strum: false });
+    const [, body] = calibrationPrompt("done", false, view.outcome);
+    expect(body).toContain("right hand");
+    expect(body).toContain("kept the default zone");
+    expect(calibrationPrompt("done", false, { chord: true, strum: true })[1]).toContain("resized");
+  });
+
+  it("thresholds: chord needs both spans, strum needs vertical span", () => {
+    const box = (w: number, h: number) => ({ left: 0, top: 0, right: w, bottom: h });
+    expect(usableChordRange(box(MIN_CHORD_SPAN, MIN_CHORD_SPAN))).not.toBeNull();
+    expect(usableChordRange(box(MIN_CHORD_SPAN - 0.01, 0.5))).toBeNull();
+    expect(usableChordRange(box(0.5, MIN_CHORD_SPAN - 0.01))).toBeNull();
+    expect(usableStrumRange(box(0.02, MIN_STRUM_SPAN))).not.toBeNull(); // narrow is fine
+    expect(usableStrumRange(box(0.5, MIN_STRUM_SPAN - 0.01))).toBeNull();
+    expect(usableChordRange(null)).toBeNull();
+    expect(usableStrumRange(null)).toBeNull();
+  });
+});
+
+describe("validateCalibration applies the movement thresholds", () => {
+  it("a stored resting-hand calibration loads as 'none' (default zones)", () => {
+    const stored = {
+      version: 1,
+      chord: { left: 0.34, top: 0.91, right: 0.36, bottom: 0.93 },
+      strum: { left: 0.59, top: 0.92, right: 0.61, bottom: 0.94 },
+      leftHanded: false,
+    };
+    expect(validateCalibration(stored)).toBeNull();
+  });
+  it("keeps the usable hand and drops the unusable one", () => {
+    const stored = {
+      version: 1,
+      chord: { left: 0.1, top: 0.3, right: 0.4, bottom: 0.9 },
+      strum: { left: 0.59, top: 0.92, right: 0.61, bottom: 0.94 },
+    };
+    const c = validateCalibration(stored)!;
+    expect(c.chord).not.toBeNull();
+    expect(c.strum).toBeNull();
   });
 });

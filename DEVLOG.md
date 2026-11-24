@@ -958,3 +958,44 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   ("the maintainer", "the project owner") without changing any decision or meaning. README's checklist
   now asks testers to open a GitHub issue; footer reworded. Earlier wording remains in git history.
 - tested: repo-wide scan finds no remaining personal references; `npm run test` 271 passed.
+
+## 2026-11-24 10:00 WIB — fix: calibration from a resting hand squeezed the zones into a corner
+
+- found (first real-webcam run by the maintainer): the strings sat in a small band at the bottom of the
+  right half and the hex flower was small and low. The band matched the zone *minimum* size exactly
+  (strings ~473×396 px on a 1892×946 canvas), i.e. both recorded ranges were tiny and near the bottom of
+  the frame — the hands had barely moved during calibration (resting, or the prompts weren't clear), and
+  `calibratedZones` grew each tiny box to the minimum around that spot.
+- did: `calibration.ts` — a recorded range must span ≥ 12% of the frame in x and y (chord hand) or
+  ≥ 15% vertically (strum hand), else it's rejected and the hand keeps its default/previous zone
+  (`usableChordRange` / `usableStrumRange`). The same check runs in `validateCalibration`, so an
+  already-saved bad calibration (like the maintainer's) is ignored on the next load — no manual step.
+  The done screen now says which hand didn't move enough; the chord/strum prompts say concretely what
+  to do ("shoulder height … move slowly around", "big strums, chest to belly"). Settings gain
+  **Reset calibration**; the debug hook exposes `calibrated`.
+- tested: `npm run test` 276 passed (+5: resting-hand session → no usable range and default zones,
+  done-view outcome + prompt, thresholds, stored bad calibration → null, mixed stored calibration);
+  e2e 8 passed (+1: saved resting-hand calibration ignored, good one applied, Reset clears it).
+  `cargo test` 140 unchanged.
+- needs human verification: rerun calibration with real hands — do the new prompts make the motion
+  clear, and are the 12% / 15% thresholds lenient enough for small natural movements?
+
+## 2026-11-24 10:30 WIB — feat: in-app "How to play" guide before first calibration
+
+- why: on the first real-webcam run the maintainer didn't know where to put their hands — the app had
+  no in-app explanation, which is also how the resting-hand calibration (previous entry) happened.
+- did: new `src/help.ts` — pure `helpSections(leftHanded)` (position: arm's length, both hands at
+  shoulder height, palms to camera, mirror; chord hand: hover a hex, 1/2/3 fingers = major/minor/7th
+  with the little finger down, strip for power chords; strum hand: palm centre must cross the lines,
+  strum with a relaxed half-closed hand because a flat open palm is palm mute, faster = louder, fist =
+  stop; tips: chord changes on the next strum, calibration, keyboard) + DOM `mountHelp` modal with
+  "Start calibration" / "Got it". It opens on first visit (flag `strhapshody.help-seen.v1`), and
+  first-run calibration now waits until it's closed; "Start calibration" queues calibration if tracking
+  isn't live yet (`calibrationPending`). Reopen with H / ? or the new panel button; Esc closes; keyboard
+  play is ignored while it's open. README: first-run flow, hand-position note, H key, Reset calibration,
+  troubleshooting for squeezed zones and silent strums; badge counts updated.
+- tested: `npm run test` 280 passed (+4 help content incl. handedness swap and palm-mute warning);
+  e2e 9 passed (+1: guide on first visit, blocks keyboard play, Esc closes, remembered after reload,
+  reopens with H and the panel button; other tests pre-mark it seen). Guide reviewed at 1280×720 and
+  1024×640. `cargo test` 140.
+- needs human verification: does the guide answer "how do I hold my hands?" for a first-time player?

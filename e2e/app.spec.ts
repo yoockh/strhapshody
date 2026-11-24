@@ -49,6 +49,13 @@ async function playChord(page: Page, letter: string, minor = false): Promise<voi
 
 const midiHz = (midi: number): number => 440 * Math.pow(2, (midi - 69) / 12);
 
+// Most tests skip the first-run "How to play" guide (it's modal); the guide
+// itself has its own test below, which opts back in.
+test.beforeEach(async ({ page }, info) => {
+  if (info.title.startsWith("first visit")) return;
+  await page.addInitScript(() => localStorage.setItem("strhapshody.help-seen.v1", "true"));
+});
+
 test("camera starts from the fake video device and the engine loads", async ({ page }) => {
   const errors = trackErrors(page);
   await openApp(page);
@@ -145,5 +152,78 @@ test("unload doesn't call into freed wasm objects", async ({ page }) => {
   await openApp(page);
   await page.evaluate(() => window.dispatchEvent(new Event("beforeunload")));
   await page.waitForTimeout(300);
+  expect(errors).toEqual([]);
+});
+
+// Regression (2026-11-24, first real-webcam run): a calibration recorded with
+// the hands resting near the bottom of the frame squeezed the strings into the
+// bottom corner. Such ranges are now rejected, also when loaded from storage.
+test("a resting-hand calibration is ignored; Reset calibration clears a good one", async ({
+  page,
+}) => {
+  const KEY = "strhapshody.calibration.v1";
+  await page.goto("/");
+  await page.evaluate((key) => {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        chord: { left: 0.34, top: 0.91, right: 0.36, bottom: 0.93 },
+        strum: { left: 0.59, top: 0.92, right: 0.61, bottom: 0.94 },
+        leftHanded: false,
+      }),
+    );
+  }, KEY);
+  await page.reload();
+  await expect.poll(async () => (await state(page)).engineReady, { timeout: 15_000 }).toBe(true);
+  expect((await page.evaluate(() => window.__strhapshody!.state().calibrated))).toBe(false);
+
+  await page.evaluate((key) => {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        chord: { left: 0.08, top: 0.35, right: 0.38, bottom: 0.9 },
+        strum: { left: 0.62, top: 0.3, right: 0.9, bottom: 0.75 },
+        leftHanded: false,
+      }),
+    );
+  }, KEY);
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__strhapshody!.state().calibrated)).toBe(true);
+
+  await page.click("#controls .settings-toggle");
+  await page.click("#controls .reset-calibration");
+  expect(await page.evaluate(() => window.__strhapshody!.state().calibrated)).toBe(false);
+  expect(await page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+});
+
+test("first visit shows the How to play guide; it closes, stays closed, and reopens with H", async ({
+  page,
+}) => {
+  const errors = trackErrors(page);
+  await openApp(page);
+  const guide = page.locator("#help");
+  await expect(guide).toBeVisible();
+  await expect(guide).toContainText("Left hand — pick the chord");
+  await expect(guide).toContainText("fully open flat palm means palm mute");
+
+  // Keyboard play is blocked while the guide is open…
+  await page.keyboard.press("c");
+  await page.keyboard.press("Escape");
+  await expect(guide).toBeHidden();
+  expect((await state(page)).sounding).toBe("—");
+
+  // …and the guide is remembered.
+  await page.reload();
+  await expect.poll(async () => (await state(page)).engineReady, { timeout: 15_000 }).toBe(true);
+  await expect(guide).toBeHidden();
+
+  await page.keyboard.press("h");
+  await expect(guide).toBeVisible();
+  await page.click("#help button:has-text('Got it')");
+  await expect(guide).toBeHidden();
+  await page.click("#controls .help-button");
+  await expect(guide).toBeVisible();
   expect(errors).toEqual([]);
 });
