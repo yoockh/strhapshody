@@ -44,7 +44,7 @@ drives). Traces are off by default; rerun a failing test with `--trace on` to de
 Real hand-tracking accuracy, real strum feel/latency-as-experienced, real lighting conditions,
 and genuine "does this feel fun to play" are NOT verifiable by an agent alone. Don't fake a pass
 on these. Log them in `DEVLOG.md` under a "needs human verification" heading as they come up,
-and the Phase 7.3 README manual checklist is where Yaya actually tries it with her own hands.
+and the README's manual test checklist covers them on real hardware.
 
 ## Running everything at once
 

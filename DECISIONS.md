@@ -6,12 +6,12 @@ decision changes, add a new ADR that supersedes the old one and say so.
 ## ADR-0001: Web app (Vite+TS) shell, not Tauri/Electron, for MVP
 
 **Context:** PRD §4 recommends a browser web app (no installer, webcam/hand-tracking/audio all
-browser-native) but mentions a Tauri/Electron desktop wrapper could be added "later". Yaya
+browser-native) but mentions a Tauri/Electron desktop wrapper could be added "later". The project owner
 asked for Rust "if possible" but left the final call to the builder.
 
 **Constraints found on this machine:** no `cargo`/`rustc` installed, no `sudo` without a
 password prompt, no `webkit2gtk-4.1`/`libappindicator-gtk3` (required for Tauri on Linux) —
-installing them needs a manual `sudo pacman -S ...` only Yaya can run. Home internet is slow
+installing them needs a manual `sudo pacman -S ...` only the machine's owner can run. The build machine's network is slow
 (~30-70 KB/s), so large toolchain downloads are a real risk to an unattended long-running build.
 
 **Decision:** Ship MVP as a pure browser web app (Vite + TypeScript), matching the PRD's own
@@ -20,7 +20,7 @@ get a Rust toolchain for a `wasm-pack`-built WASM engine (`engine/`) that implem
 deterministic game logic (hex math, gesture classification, strum detection, power chord math,
 distortion curves). This gets genuine, load-bearing Rust into the project — not a toy — while
 avoiding the sudo-gated, slow-to-install Tauri system dependencies. Tauri packaging is deferred
-to Post-MVP task P.1, to be done once Yaya runs one `pacman` command herself.
+to Post-MVP task P.1, to be done once the maintainer runs one `pacman` command.
 
 **Consequences:** the app runs via `npm run dev` in Chrome/Edge, not as a standalone desktop
 binary, until P.1 happens. This matches the PRD's stated MVP bar ("runs on laptop-class
@@ -44,7 +44,7 @@ to self-verify correctness.
 
 ## ADR-0003: Open questions from PRD §15 resolved without asking
 
-No further input was available (Yaya explicitly asked for a finished product, not a Q&A). All
+No further input was available (the project owner explicitly asked for a finished product, not a Q&A). All
 five open questions were resolved by keeping the PRD's own stated defaults/assumptions:
 
 1. Power chord strings: "top two strings" = lowest-pitched pair (6th + 5th, low E + A) as the
@@ -95,7 +95,7 @@ and `baseOptions.modelAssetPath`.
 **Decision:** load both from their canonical CDNs at runtime — the wasm fileset from jsDelivr,
 pinned to the installed package version (`@mediapipe/tasks-vision@0.10.35/wasm`), and the model
 from Google's `storage.googleapis.com/mediapipe-models/...` path. This matches MediaPipe's
-documented web setup. Rationale over vendoring: (a) home internet is slow (~30-70 KB/s, see
+documented web setup. Rationale over vendoring: (a) the build machine's network is slow (~30-70 KB/s, see
 ADR-0001) so fetching + committing multi-MB binaries now is costly and bloats the repo; (b) these
 assets only load in a real browser with a camera, which this execution environment doesn't have,
 so they can't be exercised here regardless of where they live; (c) the URLs are version-pinned so

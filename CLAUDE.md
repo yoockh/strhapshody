@@ -53,9 +53,8 @@ this file is the source of truth for *how*.
    only way the next session (possibly a different context window) knows where things stand.
 6. Work tasks top-to-bottom in `TASKS.md` phase order unless a task is blocked — dependencies
    are ordered that way on purpose (engine before UI that calls it, etc).
-7. Don't ask the human mid-task. She said: "aku hanya terima jadi" (I only want to receive it
-   done). Make reasonable calls yourself, document them in DECISIONS.md, keep going. The only
-   exception is something genuinely destructive or requiring her password/credentials.
+7. Don't ask the human mid-task. The maintainer wants to receive finished work, not questions. Make reasonable calls yourself, document them in DECISIONS.md, keep going. The only
+   exception is something genuinely destructive or requiring the maintainer's password/credentials.
 8. No camera/mic in this execution environment. For anything needing real camera input
    (MediaPipe tracking accuracy, actual audio latency feel), build it so it's correct by
    construction and unit-testable at the logic layer, and use Playwright with

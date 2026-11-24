@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-A laptop app that turns your webcam into a playable guitar. The **left hand picks the chord** and the **right hand strums**, both tracked in the air with no hardware beyond a built-in webcam and speakers. It exists for one person who misses playing guitar and only has a laptop.
+A laptop app that turns your webcam into a playable guitar. The **left hand picks the chord** and the **right hand strums**, both tracked in the air with no hardware beyond a built-in webcam and speakers. It is for guitarists who want to play without a guitar at hand — all it needs is a laptop.
 
 ## 2. Goals and Non-Goals
 
@@ -32,7 +32,7 @@ A single hobbyist guitarist playing at home on a laptop. Comfortable with chords
 **Build it as a web app that runs in the browser.** Reasons:
 
 - Webcam access (`getUserMedia`), hand tracking (Google MediaPipe Hands, runs in-browser) and audio (Web Audio API) are all built in or freely available.
-- No installer. Your friend can ship it as a link, and it works on Mac, Windows and Chromebook.
+- No installer. It can ship as a link, and it works on Mac, Windows and Chromebook.
 - Everything runs locally on the laptop, so no video leaves the machine.
 
 A desktop wrapper (Electron/Tauri) can be added later if lower audio latency is needed.

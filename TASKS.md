@@ -88,12 +88,12 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       p50/p95 against the <100ms (ideal <60ms) target from PRD §10; record results in DEVLOG.md.
 - [x] 7.3 `README.md` rewritten with real setup/run/build instructions, known limitations
       (needs real webcam + hands for full experience — see "needs human verification" entries
-      in DEVLOG.md), and a manual test checklist for Yaya to run once with her actual camera.
+      in DEVLOG.md), and a manual test checklist to run once on real hardware with a webcam.
 
 ## Post-MVP (not required for "done", don't block on these)
 
 - [ ] P.1 Tauri (Rust) desktop wrapper for native packaging — requires one manual
-      `sudo pacman -S webkit2gtk-4.1 libappindicator-gtk3 librsvg patchelf` run by Yaya first;
-      ask her when MVP is otherwise complete, don't block MVP on it.
+      `sudo pacman -S webkit2gtk-4.1 libappindicator-gtk3 librsvg patchelf` run by the maintainer first;
+      ask the maintainer when MVP is otherwise complete, don't block MVP on it.
 - [ ] P.2 7th-chord gesture (stretch goal from PRD §6.2), custom hex layouts, metronome /
       backing tracks, recording/export, more instruments.
