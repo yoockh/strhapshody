@@ -5,3 +5,7 @@ dist/
 # Rust/wasm build artifacts (engine/ scaffolded in task 0.2)
 engine/target/
 engine/pkg/
+
+# Playwright output (task 7.1)
+test-results/
+playwright-report/

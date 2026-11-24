@@ -431,3 +431,272 @@ leaving), and draws fret markers at `fretMarkerX()`. Task 4.3 reads `fretAtX`/`p
 note name. Changing the default `max_fret`, the cell count, or adding mode-boundary hysteresis in the
 *frontend* is not an ADR change; only changing the equal-cell fret mapping, the midline split, the
 string-index/octave convention, or moving note-name math into the engine would supersede this.
+
+## ADR-0014: Power-mode strum restriction is a note-set property; power chords latch on the strum boundary too
+
+**Context:** task 4.3 makes Power mode actually sound: the right hand should strum only the 2 (optionally
+3 with octave) power-chord strings, and the status bar should read e.g. "G5 (fret 3, low E)" (PRD §7).
+Questions: (a) where the "only these strings" restriction lives; (b) when a newly hovered power chord
+starts sounding; (c) whether the octave is on; (d) what happens to strings left ringing from the previous
+voicing.
+
+**Decision:**
+1. **Restriction = silent strings in the voicing.** A pure TS module (`src/voicing.ts`) turns the power
+   selection into a six-string frequency array with `0` Hz on every string except root / fifth / octave.
+   The audio engine already treats a non-positive frequency as "don't sound" (ADR-0009), so the strum
+   detector and pluck path stay untouched — no mode branch in the hot path. Pitches are derived as note
+   math (root = open string + fret, fifth = +7, octave = +12, each placed on the string index the engine's
+   `powerstrip` returned), per ADR-0013 §4; nothing about tuning is hard-coded beyond `OPEN_STRING_MIDI`.
+2. **Same strum-boundary rule as chords (ADR-0012).** The hovered power chord is a *pending* selection
+   (last valid fret+pair, held through gap/off-strip frames); the engine's note set only changes on a strum
+   frame. `selectVoicing(mode, power, chord)` picks the power chord in Power mode, else the latched hex
+   chord; the frontend reloads the engine only when the voicing's identity `key` changes (so Power→Chord
+   with an unchanged latched chord still swaps the note set back). The latch itself is unchanged and still
+   commits on every crossing frame. The strip previews the hovered power chord name before it sounds; the
+   status bar shows the *sounding* voicing's label.
+3. **Octave on by default** (`POWER_CHORD_OCTAVE = true` in `main.ts`) for a fuller sound; it's the PRD's
+   "optional" third string and becomes a Phase 6.2 setting.
+4. **`setChord()` damps strings the new voicing doesn't sound**, as a guitarist's fretting hand would —
+   otherwise a low E ringing from a G chord would bleed under an A5 or a C (whose low E is muted).
+
+**Consequences:** the status bar's CHORD field now shows the last loaded voicing label (chord or power);
+`applyCommittedChord` in `main.ts` is replaced by `applySoundingVoicing`. Changing the octave default or
+the label format is not an ADR change; moving the restriction into the strum path or letting a power chord
+sound mid-ring would supersede this.
+
+## ADR-0015: Acoustic voice = Karplus-Strong rendered to a buffer in the Rust engine, injected into the audio engine
+
+**Context:** task 5.1 replaces the placeholder triangle-oscillator pluck with a real acoustic guitar voice.
+TASKS.md names Karplus-Strong as the pragmatic choice (no sample licensing, testable by inspecting the
+output buffer). Questions: (a) where the DSP runs — Rust/WASM, TS, or an AudioWorklet; (b) how it reaches
+Web Audio; (c) how per-note parameters are chosen.
+
+**Decision:**
+1. **Rust `pluck` module renders a whole note to a `Vec<f32>`** (`renderPluck(freq, sampleRate, duration,
+   t60, brightness, seed) → Float32Array`). Extended KS: seeded lowpassed noise burst, two-point-average
+   loop filter with loss `ρ = 10^(−3/(t60·f))`, and a first-order allpass for fractional-delay tuning.
+   Being a pure function it is `cargo test`-ed on the samples: pitch within 1 cent across E2–E5 (measured
+   < 0.11 cent), T60 decay, palm-mute thud, brightness tilt, boundedness, DC, determinism, sanitisation.
+   An AudioWorklet was rejected for now: real-time streaming adds a second wasm instance in the worklet
+   scope and a message protocol, for no audible gain on a 6-voice instrument; rendering a ≤3.5 s note is
+   sub-millisecond in wasm.
+2. **Played as an `AudioBufferSourceNode` per pluck**, through the existing per-voice gain → master bus,
+   so retrigger/`stopAll`/damping from ADR-0009/0014 work unchanged. The renderer is **injected**
+   (`audioEngine.setPluckRenderer(renderPluck)` after `initEngine()`), so `audio.ts` stays wasm-free and
+   node-importable, and the instrument is playable before the wasm loads (oscillator fallback, also used
+   if a render throws or returns empty).
+3. **Per-note parameters are pure TS** (`acousticPluckParams`): T60 ∝ 1/√f clamped to [1.2, 6] s (~5 s on
+   low E, ~2.6 s on high e); brightness from strum velocity (harder = brighter); render length capped at
+   3.5 s (fade built into the buffer); palm-muted = T60 0.18 s, half brightness. Each pluck gets a new
+   seed so repeated strums aren't sample-identical.
+
+**Consequences:** the electric voice (5.2) reuses the same KS source and adds a waveshaper/tone chain after
+the voices. Retuning T60/brightness constants is feel-tuning, not an ADR change; moving synthesis into an
+AudioWorklet or to samples would supersede this.
+
+## ADR-0016: Electric voice — shared waveshaper chain with drive 0 as "clean", curve from the engine
+
+**Context:** task 5.2 adds an electric clean + distortion voice: a `WaveShaperNode` driven by a Rust curve
+generator with a drive parameter, plus a basic tone control. Questions: (a) curve shape; (b) whether clean
+and distortion are separate chains; (c) tone control form; (d) keeping loudness sane as drive rises.
+
+**Decision:**
+1. **Curve = normalised tanh soft clip** `y = tanh(k·x)/tanh(k)`, `k = 40·drive`, from the new engine module
+   `distortion.rs` (`distortionCurve(samples, drive)`). Odd-symmetric (no DC, odd harmonics), monotonic,
+   `y(±1) = ±1`, identity at drive 0. Cargo-tested on those properties plus "more drive ⇒ more gain and a
+   squarer sine" (crest factor √2 → ~1).
+2. **One electric chain for both instruments**: voices → bus → (acoustic send → master) or (electric send
+   ×0.3 → WaveShaper 4× oversampled → lowpass tone → compensation gain → master). "Electric Clean" is the
+   same chain at drive 0 (shaper curve `null` = pass-through), "Electric Dist" uses the drive (default 0.6).
+   Switching crossfades the two sends (10 ms time constant). The curve generator is injected after engine
+   init, like the pluck renderer (ADR-0015); before then electric is simply clean. Curves are cached per
+   1% of drive.
+3. **Tone = 12 dB/oct lowpass**, knob `[0,1]` mapped exponentially to 700 Hz–12 kHz (`toneToCutoff`),
+   default 0.65 (~4.4 kHz) to tame the fizz of the saturated highs. Acoustic bypasses it.
+4. **Level compensation** `1/(1+12·drive)` on the chain output, tuned by measuring master-bus RMS in
+   headless Chromium (6-string strum): acoustic 0.088, clean 0.099, distortion 0.118 — distortion lands a
+   little louder, not +7 dB as with a weaker factor. Electric plucks use brighter excitation and longer
+   T60 (∝1/√f, 2.5–9 s) than acoustic.
+
+**Consequences:** `AudioEngine` gains `setInstrument / instrument / setDrive / setTone /
+setCurveGenerator`; task 5.3 adds the UI toggle and reverb on top. Changing k, the tone range or the
+compensation constant is tuning; a separate clean chain, an asymmetric curve, or moving the curve into TS
+would supersede this.
+
+## ADR-0017: Sound controls — synthetic reverb IR from the engine, DOM control panel, 1/2/3/I shortcuts
+
+**Context:** task 5.3 adds an instrument toggle (on-screen + keyboard), volume, and a simple reverb with an
+amount control. Questions: (a) recorded vs algorithmic reverb, and where it's generated; (b) how the
+controls are drawn; (c) which keys, given the task-6.4 keyboard fallback will own A–G, Shift and Space.
+
+**Decision:**
+1. **ConvolverNode with an IR synthesised by the engine** (`reverb.rs`, `reverbImpulse(sr, rt60, damping,
+   seed)`): 8 ms pre-delay, noise under an e^(−ln1000·t/RT60) envelope, a one-pole lowpass that darkens over
+   the tail, normalised to unit energy; stereo = two seeds (cargo-tested correlation < 0.1). No recorded IR
+   to license or download (ADR-0001/0005). `convolver.normalize = false` because the IR is already
+   unit-energy, so the wet level is predictable. Defaults: RT60 2.2 s, damping 0.6, amount 0.25.
+2. **Mix and volume are pure TS:** `reverbMix(a)` → dry `1−0.3a`, wet `0.8a`; `volumeToGain(v) = 0.55·v²`
+   (perceptual; default 0.8 ≈ the previous fixed 0.35 master). Graph: instrument routes → mix → (dry, and
+   convolver → wet) → master(volume) → destination. IR generator injected after engine init (ADR-0015
+   pattern); before that the wet path is silent.
+3. **DOM panel, not canvas:** real buttons (`aria-pressed`) and `<input type=range>` sliders, bottom-right,
+   so they work with mouse/touch/keyboard and screen readers. Buttons blur after click so Space stays free
+   for strumming.
+4. **Shortcuts `1`/`2`/`3` (Acoustic / Electric Clean / Electric Dist) and `I` (cycle)**; ignored with
+   Ctrl/Meta/Alt and while a slider has focus. Volume/reverb have no shortcuts (sliders only) to keep the
+   key map small next to the 6.4 fallback.
+
+**Consequences:** settings persistence (localStorage) is task 6.2's job and will cover these too. Changing
+RT60/damping/mix constants is tuning; using a recorded IR or an algorithmic (Freeverb-style) network would
+supersede this.
+
+## ADR-0018: Calibration records robust per-hand ranges in normalised coords and fits zones inside their halves
+
+**Context:** task 6.1 — a ~20 s first-run calibration capturing each hand's comfortable range and resizing
+the zones to match. Questions: (a) the flow and how ranges are measured robustly; (b) how a range becomes
+a zone; (c) persistence and when it runs.
+
+**Decision:**
+1. **Timed flow, one hand at a time:** intro 3 s → left 8 s → right 8 s → done 1.5 s (20.5 s). Recording one
+   hand per phase means the user can focus, and the left phase isn't polluted by strumming motion. The
+   range is the **5th–95th percentile box** of the palm-centre samples (≥ 30 samples, else that hand keeps
+   its previous/default zone), so a stray mis-tracked frame can't inflate a zone. A pure
+   `CalibrationSession` holds the clock + samples; strumming is paused while it runs and the strum
+   detector is reset after (ADR-0007 re-entry hazard).
+2. **Range → zone (`calibratedZones`):** pad 15% per side, grow to a minimum (left: 55% × 60% of its half,
+   strings: 50% × 45%) around the range centre, and clamp inside **its own half** below the status bar.
+   Keeping zones in their halves means role assignment by screen side (ADR handedness/§13) still agrees
+   with where the UI is, and the two zones can never overlap. The left zone feeds the existing
+   strip+hex layout; the right zone gives the strings' y-span (strum detector) and x-span (drawing).
+3. **Stored normalised (0..1, mirrored as seen)** under `strhapshody.calibration.v1` via a guarded
+   localStorage wrapper (`storage.ts`, validates on load), so it survives resizes and bad/old data falls
+   back to defaults. Auto-starts once per page load when nothing is saved and tracking is live; the
+   Calibrate button reruns it; Esc cancels without saving. A hand not seen during a rerun keeps its
+   previous range.
+
+**Consequences:** the zone tints/divider still draw as halves (the zones sit inside them). Changing phase
+lengths, percentiles, padding or minimums is tuning; zones crossing the midline or storing pixels would
+supersede this.
+
+## ADR-0019: Settings — knob positions persisted, mapped to engine units in pure TS; left-handed mirrors the whole layout
+
+**Context:** task 6.2 — a settings panel with handedness swap and sensitivity sliders (strum threshold,
+smoothing, hex size), persisted in localStorage. Earlier ADRs deferred the power-chord octave (0014) and
+sound-control persistence (0017) to this task.
+
+**Decision:**
+1. **One `Settings` object** (`src/settings.ts`): `leftHanded, strumThreshold, smoothing, hexSize,
+   powerOctave, instrument, volume, reverb`, stored as JSON under `strhapshody.settings.v1`. Sliders are
+   saved as **0..1 knob positions**, not engine units, and mapped by pure functions, so units can be
+   retuned without invalidating saved settings. `validateSettings` merges field-by-field with defaults
+   (clamping knobs), so one bad field from an older build never resets the others.
+2. **Mappings:** strum threshold → strum detector min crossing speed `2·height·t²` px/s (default 0.3 ≈
+   130 px/s on 720 px: above a drifting hand, far below a strum); smoothing → One Euro `min_cutoff`
+   exponential 5 Hz → 0.3 Hz (default ≈ 1.4 Hz, ~the old fixed 1.5); hex size → radius scale 0.6–1.0 of
+   the largest flower that fits.
+3. **Strum threshold lives in the engine** (`StrumDetector.setMinVelocity`): too-slow steps emit nothing
+   but still advance the reference point, so a slowly passed line is skipped, never fired late
+   (cargo-tested). It's strum-detection logic, so per CLAUDE.md it's Rust, not a TS filter.
+4. **Left-handed mirrors everything:** `assignHands({ leftHanded })` swaps the label→role map and the
+   screen-side fallback; `calibratedZones(…, leftHanded)` puts the chord zone in the right half; tints,
+   zone labels, calibration prompts and the control panel (always on the strum side, so it never covers
+   the flower) follow. Calibration now stores `chord`/`strum` boxes plus the handedness they were recorded
+   with; switching handedness mirrors them (x → 1−x) instead of discarding them.
+
+**Consequences:** changing a setting re-seeds what it affects (smoothing rebuilds the cursor filters;
+handedness resets every per-hand detector). Retuning mapping constants is not an ADR change; storing
+engine units or dropping the field-wise merge would supersede this.
+
+## ADR-0020: Tracking warnings — frame luma + MediaPipe scores + edge proximity, debounced with onset/release
+
+**Context:** task 6.3 — "lighting too dark" and "hand out of frame" banners driven by MediaPipe tracking
+confidence and frame presence. HandLandmarker reports no per-hand presence score in its result, only the
+handedness category score; brightness has to be measured separately.
+
+**Decision:**
+1. **Signals:** mean Rec.601 luma of the camera frame (drawn into a 32×18 offscreen canvas every 15 frames
+   — negligible cost) below 0.15 → `dark`; mean handedness score of the hands in view below 0.55 →
+   `lowConfidence` (the best confidence proxy the API gives); no hands → `noHands`; one role missing →
+   `chordMissing`/`strumMissing`; any landmark within 2% of the *visible canvas* edge (after the cover
+   crop, i.e. what the player sees) → `chordEdge`/`strumEdge`. "No hands" suppresses the two "missing"
+   warnings so one problem gives one banner.
+2. **Debounce:** a condition must hold 1.0 s to show and be clear 0.6 s to hide (`WarningMonitor`), so a
+   single bad frame never flashes a banner and a borderline one doesn't flicker. Fixed priority order
+   (dark > lowConfidence > noHands > missing > edge); at most two banners, bottom-centre.
+3. **Only while playing:** the monitor runs once tracking is live and is reset during calibration (whose
+   own overlay already tells the player where to put their hands).
+
+**Consequences:** thresholds are tuning (needs a real camera to pick well); adding a per-hand presence
+score if MediaPipe exposes one later would refine `lowConfidence` without changing this contract.
+
+## ADR-0021: Keyboard fallback feeds the same latch/voicing path; Shift is held (not a toggle) for minor
+
+**Context:** task 6.4 — A–G select chord, Shift toggles major/minor, Space strums down, Shift+Space up;
+doubles as a debug/demo mode without a camera and as the e2e driver for 7.1.
+
+**Decision:**
+1. **Shift held = minor** (`Shift+A` = Am), not a sticky toggle: Shift is also the upstroke modifier, so a
+   toggle would flip quality on every upstroke. Ctrl/Meta/Alt chords and key auto-repeat are ignored
+   (holding Space must not machine-gun; browser shortcuts keep working). The 1/2/3/I instrument keys don't
+   collide.
+2. **Same pipeline as the hands:** a letter sets the chord latch's *pending* chord (ADR-0012) and switches
+   to Chord mode; Space calls the shared `strumBoundary()` (commit + `applySoundingVoicing`, ADR-0014)
+   and then rakes all six strings — top→bottom down, bottom→top up, 12 ms apart, upstroke at 0.75×
+   velocity (PRD §8) — scheduled on the AudioContext clock via a new `pluck(…, delay)` argument, so the
+   rake is sample-accurate rather than setTimeout-jittered. A hand on the flower still overrides the
+   keyboard's pending chord.
+3. **Demo feedback:** strings glow briefly when plucked (hand or keyboard; pure `stringGlow`); with no
+   hand on the flower it highlights the pending chord cell; the camera-error panel names the keys and
+   shrinks to a one-line notice once the keyboard is used.
+
+**Consequences:** the keyboard path is the deterministic way to exercise chord → voicing → audio without
+a camera (task 7.1). A dominant-7th key or a sticky minor mode would be additions, not a contract change.
+
+## ADR-0022: E2E asserts measured audio through a read-only state hook; fake camera from a generated Y4M
+
+**Context:** task 7.1 — Playwright with a fake media device and a fake video file, driving the keyboard
+fallback through C–G–Am–F and asserting that the audio context produced sound for each chord.
+
+**Decision:**
+1. **Observability, not mocks:** the audio engine exposes `stats.voicesStarted`, `outputLevel()` (RMS
+   from an `AnalyserNode` tapped off the master bus — it doesn't alter the sound), `currentChord()` and
+   `clock()`. `main.ts` publishes a read-only `window.__strhapshody.state()` snapshot (sounding label,
+   mode, instrument, note set, voices, level, camera/engine status). Tests assert the right *number* of
+   voices started for each voicing and that the master output actually carries signal — real Web Audio,
+   real WASM, nothing stubbed. The hook can't change state, so shipping it is harmless and handy in
+   devtools.
+2. **Production build under test:** Playwright's `webServer` runs `npm run build && vite preview`;
+   `npm run test:e2e` builds the engine first. Chromium gets `--use-fake-device-for-media-stream`,
+   `--use-fake-ui-for-media-stream` and `--use-file-for-fake-video-capture` pointing at a 160×120×30
+   Y4M clip generated into the OS temp dir by `e2e/fake-video.ts` (no binary in git).
+3. **Versions:** `@playwright/test` pinned to the environment's preinstalled Playwright (1.63.0) so the
+   bundled Chromium matches; on a fresh machine `npx playwright install chromium` once. Traces off.
+4. The unload use-after-free fix (2026-11-23) has its regression test here (verified to fail with the
+   fix reverted).
+
+**Consequences:** hand-tracking accuracy and feel remain untestable here (TESTING.md); new UI/audio
+features should add an e2e case driven through the keyboard or the hook rather than mocks.
+
+## ADR-0023: Latency = detection → audible via getOutputTimestamp; camera → sound measured live with `?latency`
+
+**Context:** task 7.2 — timestamp strum-event detection vs. audio start, report p50/p95 against PRD §10
+(< 100 ms, ideally < 60 ms). There is no camera or audio device here, and the camera → detection part
+(frame capture, MediaPipe) can only be measured on real hardware.
+
+**Decision:**
+1. **What "audio start" means:** the performance-clock time at which the first voice's first sample
+   reaches the output device, obtained by mapping its audio-clock start through
+   `AudioContext.getOutputTimestamp()` (which pairs an audio-clock time with the performance time it is
+   presented, so device buffering is included). Fallback when no usable timestamp: scheduling delay +
+   `baseLatency + outputLatency`. "Detection" is the key event's `timeStamp` (keyboard) or the moment the
+   strum detector returned crossings (hands). Pure maths in `src/latency.ts` (nearest-rank p50/p95).
+2. **In-app log, two readers:** every strum boundary appends a sample (ring buffer of 200) with JS
+   processing time and — for hand strums — the frame's camera `captureTime` from
+   `requestVideoFrameCallback`, giving an end-to-end camera → sound figure. The Playwright harness
+   (`e2e/latency.spec.ts`, 60 keyboard strums cycling C/G/Am/F) reads it through the debug hook, writes
+   `test-results/latency.json` and fails if p95 ≥ 100 ms; `?latency` in the URL draws a live p50/p95
+   readout so the camera path can be measured with real hands.
+
+**Consequences:** headless numbers reflect Chromium's fake output device (outputLatency 32 ms); real
+hardware differs, so the README checklist asks for a `?latency` reading. A per-string sub-frame crossing
+time (ADR-0007 note) would refine hand-path detection timestamps without changing this contract.

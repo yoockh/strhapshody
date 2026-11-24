@@ -56,37 +56,37 @@ order encodes dependencies. See `CLAUDE.md` for workflow rules.
       positions) and string-pair-from-height (upper = 6th+5th, lower = 5th+4th); unit tests.
 - [x] 4.2 Power Chord Strip UI above the hex grid; entering it switches to Power mode,
       returning to the hex area switches back to Chord mode.
-- [ ] 4.3 Power-mode strumming restricted to the 2 (optionally 3 with octave) relevant strings;
+- [x] 4.3 Power-mode strumming restricted to the 2 (optionally 3 with octave) relevant strings;
       status bar shows note name e.g. "G5 (fret 3, low E)".
 
 ## Phase 5 — Sound quality
 
-- [ ] 5.1 Acoustic instrument voice (Karplus-Strong plucked-string model is the pragmatic
+- [x] 5.1 Acoustic instrument voice (Karplus-Strong plucked-string model is the pragmatic
       choice — no sample licensing, genuinely testable by inspecting the output buffer).
-- [ ] 5.2 Electric clean + distortion voice: Web Audio `WaveShaperNode` driven by a Rust/WASM
+- [x] 5.2 Electric clean + distortion voice: Web Audio `WaveShaperNode` driven by a Rust/WASM
       curve generator with a drive parameter, plus a basic tone control (lowpass/shelf).
-- [ ] 5.3 Instrument toggle (on-screen + keyboard shortcut), volume control, simple reverb
+- [x] 5.3 Instrument toggle (on-screen + keyboard shortcut), volume control, simple reverb
       (ConvolverNode or algorithmic) amount control.
 
 ## Phase 6 — Calibration, settings, fallback
 
-- [ ] 6.1 First-run calibration flow (~20s): capture each hand's comfortable range, resize
+- [x] 6.1 First-run calibration flow (~20s): capture each hand's comfortable range, resize
       zones to match.
-- [ ] 6.2 Settings panel: handedness swap, sensitivity sliders (strum threshold, smoothing,
+- [x] 6.2 Settings panel: handedness swap, sensitivity sliders (strum threshold, smoothing,
       hex size), persisted in localStorage.
-- [ ] 6.3 Lighting-too-dark / hand-out-of-frame warning banners driven by MediaPipe tracking
+- [x] 6.3 Lighting-too-dark / hand-out-of-frame warning banners driven by MediaPipe tracking
       confidence + frame presence.
-- [ ] 6.4 Keyboard fallback: letter keys A–G select chord, shift toggles major/minor, spacebar
+- [x] 6.4 Keyboard fallback: letter keys A–G select chord, shift toggles major/minor, spacebar
       strums down, shift+spacebar strums up. Doubles as a debug/demo mode without a camera.
 
 ## Phase 7 — Testing & polish pass
 
-- [ ] 7.1 Playwright end-to-end test: launch with `--use-fake-device-for-media-stream` and a
+- [x] 7.1 Playwright end-to-end test: launch with `--use-fake-device-for-media-stream` and a
       fake video file, drive the keyboard-fallback path through a C–G–Am–F progression, assert
       audio context produced sound events for each chord.
-- [ ] 7.2 Latency measurement harness: timestamp strum-event detection vs. audio start, log
+- [x] 7.2 Latency measurement harness: timestamp strum-event detection vs. audio start, log
       p50/p95 against the <100ms (ideal <60ms) target from PRD §10; record results in DEVLOG.md.
-- [ ] 7.3 `README.md` rewritten with real setup/run/build instructions, known limitations
+- [x] 7.3 `README.md` rewritten with real setup/run/build instructions, known limitations
       (needs real webcam + hands for full experience — see "needs human verification" entries
       in DEVLOG.md), and a manual test checklist for Yaya to run once with her actual camera.
 

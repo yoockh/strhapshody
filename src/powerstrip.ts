@@ -173,8 +173,9 @@ export const DEFAULT_POWER_STRIP_STYLE: PowerStripStyle = {
  * is). `active` is whether the app is in Power mode (cursor on the strip): when
  * active the strip gets the accent fill/stroke, and `activeFret` (`-1` = none) /
  * `activePair` (`-1` none, `0` upper, `1` lower) light the hovered fret column
- * in the hovered half, so the mode switch is visibly engaged. The note-name
- * readout and the actual restricted strum are task 4.3.
+ * in the hovered half, so the mode switch is visibly engaged. `hoverLabel`
+ * (e.g. "G5 (fret 3, low E)", task 4.3) replaces the POWER caption while a
+ * power chord is hovered, previewing what the next strum will sound.
  */
 export function drawPowerStrip(
   ctx: CanvasRenderingContext2D,
@@ -182,6 +183,7 @@ export function drawPowerStrip(
   active: boolean,
   activeFret = -1,
   activePair = -1,
+  hoverLabel: string | null = null,
   style: PowerStripStyle = DEFAULT_POWER_STRIP_STYLE,
 ): void {
   const { rect, markerXs } = view;
@@ -260,7 +262,7 @@ export function drawPowerStrip(
   ctx.textAlign = "right";
   ctx.fillStyle = active ? style.activeStroke : style.labelColor;
   ctx.font = `700 ${labelSize}px system-ui, sans-serif`;
-  ctx.fillText("POWER", rect.right - 4, rect.top + h * 0.25);
+  ctx.fillText(active && hoverLabel ? hoverLabel : "POWER", rect.right - 4, rect.top + h * 0.25);
 
   ctx.restore();
 }

@@ -130,3 +130,34 @@ describe("roleIsTracked + default map", () => {
     expect(roleIsTracked([], "chord")).toBe(false);
   });
 });
+
+describe("assignHands — left-handed (task 6.2)", () => {
+  const opts = { leftHanded: true };
+
+  it("swaps the label mapping: the user's right hand picks chords", () => {
+    // MediaPipe "Left" = user's right hand (mirror convention).
+    const r = assignHands([hand("Left", 0.95, 0.3), hand("Right", 0.95, 0.7)], opts);
+    expect(r.find((a) => a.index === 0)!.role).toBe("chord");
+    expect(r.find((a) => a.index === 1)!.role).toBe("strum");
+    expect(r[0]!.source).toBe("handedness");
+  });
+
+  it("screen-side fallback puts chords on the right half", () => {
+    // Same labels → screen side. videoX 0.2 → screenX 0.8 (right of screen).
+    const r = assignHands([hand("Right", 0.95, 0.2), hand("Right", 0.95, 0.8)], opts);
+    expect(r[0]!.screenX).toBeCloseTo(0.8, 6);
+    expect(r[0]!.role).toBe("chord");
+    expect(r[1]!.role).toBe("strum");
+    expect(r[0]!.source).toBe("screen-side");
+  });
+
+  it("single low-confidence hand: right half → chord, left half → strum", () => {
+    expect(assignHands([hand("Left", 0.2, 0.2)], opts)[0]!.role).toBe("chord");
+    expect(assignHands([hand("Left", 0.2, 0.8)], opts)[0]!.role).toBe("strum");
+  });
+
+  it("right-handed default is unchanged", () => {
+    expect(assignHands([hand("Left", 0.2, 0.2)])[0]!.role).toBe("strum");
+    expect(assignHands([hand("Right", 0.95, 0.5)])[0]!.role).toBe(DEFAULT_HANDEDNESS_ROLE.Right);
+  });
+});

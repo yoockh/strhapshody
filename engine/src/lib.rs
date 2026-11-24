@@ -4,9 +4,10 @@
 //! logic (see DECISIONS.md ADR-0002). It compiles to WASM for the browser and
 //! is unit-tested natively with `cargo test` — no camera or human in the loop.
 //!
-//! Task 0.2 only proves the WASM pipeline end to end with a couple of trivial
-//! exported functions and a native round-trip test. Real modules (hexmap,
-//! strum, smoothing, powerstrip, gesture, distortion) land in later phases.
+//! Modules: smoothing (One Euro), strum, gesture, fingercount, hexmap,
+//! chordlatch, powerstrip, and the DSP buffer generators pluck (Karplus-Strong),
+//! distortion (waveshaper curve) and reverb (impulse response). `add` /
+//! `engine_version` are the task-0.2 WASM round-trip probes.
 
 use wasm_bindgen::prelude::*;
 
@@ -30,6 +31,15 @@ pub use chordlatch::ChordLatch;
 
 pub mod powerstrip;
 pub use powerstrip::{PowerPair, PowerStrip};
+
+pub mod pluck;
+pub use pluck::render_pluck;
+
+pub mod distortion;
+pub use distortion::distortion_curve;
+
+pub mod reverb;
+pub use reverb::reverb_impulse;
 
 /// Trivial number round-trip: proves primitive values marshal across the
 /// JS <-> WASM boundary. Used by the TS round-trip test for task 0.2.

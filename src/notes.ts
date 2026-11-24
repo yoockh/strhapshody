@@ -36,6 +36,33 @@ export function midiToFrequency(midi: number): number {
   return A4_HZ * Math.pow(2, (midi - A4_MIDI) / 12);
 }
 
+/** Sharp-spelled pitch-class names, index = semitone above C. */
+export const PITCH_CLASS_NAMES: readonly string[] = [
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B",
+];
+
+/**
+ * Pitch-class name (no octave, sharp spelling) of a MIDI note: 67 → "G",
+ * 46 → "A#". Non-integer input is rounded; non-finite → `null`. Negative MIDI
+ * numbers wrap correctly (pitch class is taken modulo 12).
+ */
+export function midiToPitchClass(midi: number): string | null {
+  if (!Number.isFinite(midi)) return null;
+  const pc = ((Math.round(midi) % 12) + 12) % 12;
+  return PITCH_CLASS_NAMES[pc] ?? null;
+}
+
 /**
  * Parse a scientific-pitch-notation note name into a MIDI note number, or
  * `null` if it doesn't parse. Accepts an optional accidental (`#`/`s` sharp,

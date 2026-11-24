@@ -93,6 +93,7 @@ export function drawStrings(
   zoneRight: number,
   top: number,
   bottom: number,
+  glow: readonly number[] = [],
 ): void {
   const ys = computeStringYs(top, bottom);
   const inset = (zoneRight - zoneLeft) * 0.04;
@@ -100,14 +101,33 @@ export function drawStrings(
   const x1 = zoneRight - inset;
 
   ctx.save();
-  ctx.strokeStyle = STRING_INK;
   ctx.lineCap = "round";
   for (let i = 0; i < ys.length; i++) {
-    ctx.lineWidth = stringWidth(i);
+    const g = Math.min(1, Math.max(0, glow[i] ?? 0));
+    ctx.strokeStyle = g > 0 ? `rgba(232, 161, 58, ${0.45 + 0.55 * g})` : STRING_INK;
+    ctx.lineWidth = stringWidth(i) * (1 + 1.5 * g);
     ctx.beginPath();
     ctx.moveTo(x0, ys[i]!);
     ctx.lineTo(x1, ys[i]!);
     ctx.stroke();
   }
   ctx.restore();
+}
+
+/**
+ * Per-string glow in [0,1] for the "just plucked" highlight: 1 at the pluck,
+ * fading linearly to 0 over `fade` seconds. `lastPluck[i]` is string i's last
+ * pluck time (seconds, same clock as `now`), or -Infinity if never. A pluck
+ * scheduled slightly in the future (keyboard rake) reads as 1.
+ */
+export function stringGlow(
+  lastPluck: readonly number[],
+  now: number,
+  fade = 0.25,
+): number[] {
+  return lastPluck.map((t) => {
+    if (!Number.isFinite(t) || !(fade > 0)) return 0;
+    const age = now - t;
+    return age <= 0 ? 1 : Math.max(0, 1 - age / fade);
+  });
 }

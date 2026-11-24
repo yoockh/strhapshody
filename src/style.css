@@ -33,3 +33,104 @@ body {
   height: 100%;
   display: block;
 }
+
+/* Sound controls panel (task 5.3), bottom-right over the canvas. */
+#controls {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(14, 18, 24, 0.82);
+  border: 1px solid rgba(232, 234, 237, 0.15);
+  font-size: 12px;
+  max-width: calc(100vw - 24px);
+}
+
+#controls .instrument-group {
+  display: flex;
+  gap: 4px;
+}
+
+#controls button {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(232, 234, 237, 0.25);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#controls button[aria-pressed="true"] {
+  background: #e8a13a;
+  border-color: #e8a13a;
+  color: #14181e;
+}
+
+#controls .slider-row {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-items: center;
+  gap: 8px;
+  color: rgba(232, 234, 237, 0.7);
+}
+
+#controls input[type="range"] {
+  width: 100%;
+  accent-color: #e8a13a;
+}
+
+#controls .action-row {
+  display: flex;
+  gap: 4px;
+}
+
+#controls #settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(232, 234, 237, 0.15);
+}
+
+#controls #settings-section[hidden] {
+  display: none;
+}
+
+#controls #settings-section .slider-row {
+  grid-template-columns: 96px 1fr;
+}
+
+#controls .check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(232, 234, 237, 0.85);
+  cursor: pointer;
+}
+
+#controls .check-row input {
+  accent-color: #e8a13a;
+}
+
+/* Left-handed: the strings are on the left, so the panel moves there too and
+   never covers the chord flower. */
+#controls.strum-left {
+  right: auto;
+  left: 12px;
+}
+
+#controls .hint {
+  margin: 0;
+  max-width: 290px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(232, 234, 237, 0.55);
+}

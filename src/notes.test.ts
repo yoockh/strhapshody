@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   A4_HZ,
   midiToFrequency,
+  midiToPitchClass,
   noteToMidi,
   noteToFrequency,
   TEST_CHORD_NOTES,
@@ -92,5 +93,19 @@ describe("TEST_CHORD", () => {
         10,
       );
     }
+  });
+});
+
+describe("midiToPitchClass", () => {
+  it("names pitch classes with sharp spelling", () => {
+    expect(midiToPitchClass(60)).toBe("C");
+    expect(midiToPitchClass(43)).toBe("G");
+    expect(midiToPitchClass(46)).toBe("A#");
+    expect(midiToPitchClass(40)).toBe("E");
+  });
+  it("wraps negatives, rounds, and rejects non-finite", () => {
+    expect(midiToPitchClass(-1)).toBe("B");
+    expect(midiToPitchClass(59.6)).toBe("C");
+    expect(midiToPitchClass(Number.NaN)).toBeNull();
   });
 });

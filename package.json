@@ -14,9 +14,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:engine": "cd engine && cargo test",
-    "test:all": "npm run test:engine && npm run test"
+    "test:all": "npm run test:engine && npm run test",
+    "test:e2e": "npm run build:engine && playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.7",
     "vitest": "^5.1.1"

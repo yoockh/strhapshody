@@ -645,3 +645,296 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   tested, geometry cargo-tested in 4.1, build/typecheck green) but not visually confirmed in this
   camera-less env. Belongs on the Phase 6.2 tuning + Phase 7.3 manual checklist; the pipeline gets a
   deterministic exercise via the Playwright suite (7.1).
+
+## 2026-11-23 13:50 WIB — task 4.3 power-mode restricted strum + "G5 (fret 3, low E)" readout
+
+- environment (new cloud container, not Yaya's machine): fresh clone had no `wasm32-unknown-unknown`
+  target, no `wasm-pack`, no `node_modules`. Installed via `rustup target add`, `cargo install
+  wasm-pack`, `npm ci`. wasm-pack's own binaryen download from GitHub releases is blocked here, and
+  apt's binaryen 108 is **too old for wasm-bindgen 0.2.130**: the optimized wasm fails to instantiate in
+  Chromium (`WebAssembly.Table.set(): ... function-typed object`) even with explicit `--enable-*` feature
+  flags. Fix (env only, no repo change): `npm i -g binaryen@latest` (wasm-opt 132) — wasm-pack picks it
+  up from PATH and the engine inits fine. If a future session sees that error, check `wasm-opt
+  --version` first.
+- did: closed Phase 4 (ADR-0014). New pure `src/voicing.ts`: `powerVoicing(sel, withOctave)` builds a
+  six-string note set with only the root (open string + fret), fifth (+7) and optional octave (+12)
+  non-zero, on the string indices the engine's `powerstrip` returned — the other strings are 0 Hz, which
+  the audio engine already ignores, so that *is* the strum restriction; `powerChordLabel` → "G5 (fret 3,
+  low E)"; `chordVoicing` wraps the 3.5 chord table; `selectVoicing(mode, power, chord)` picks which one
+  a strum sounds; every voicing carries a `key` so the engine only reloads on an actual change. Added
+  `midiToPitchClass` to `notes.ts`. `main.ts`: Power mode now records a held `pendingPower` (last valid
+  fret + root/fifth/octave strings from `PowerStrip`), and on each strum frame commits the chord latch
+  then calls `applySoundingVoicing()` (replaces `applyCommittedChord`); the status-bar CHORD field shows
+  the sounding voicing label; the strip's caption previews the hovered power chord. `audio.ts`
+  `setChord()` now damps strings the new voicing doesn't sound (no low E bleeding under an A5/C).
+- tested: `cargo test` 106 passed / 0 failed; `npm run test` 14 files / 145 tests passed (+18 voicing
+  tests: PRD label example, sharp roots, G5 = G2/D3/G3 with the rest silent, exactly 2 strings without
+  octave, lower-pair C5, perfect-fifth + octave ratios at every fret on both pairs, pitch rises with fret,
+  key identity, invalid selections, select logic; +2 `midiToPitchClass`); `npm run typecheck` 0;
+  `npm run build` clean. **New: headless-Chromium smoke load** of `vite preview` with a fake camera —
+  the WASM engine initializes and the strip / hex flower / strings render; MediaPipe assets can't load
+  here (CDN blocked by the sandbox proxy), expected per ADR-0005.
+- next: Phase 5 — task 5.1 Karplus-Strong acoustic voice. Also noticed (not yet wired): the 2.3
+  palm-mute / fist-stop `GestureDetector` exists in the engine but isn't connected to audio in the render
+  loop; plan to wire it with 5.1 (palm mute = short damped Karplus-Strong decay, fist = `stopAll`).
+  Cosmetic: the centred "LEFT HAND · chords" zone caption overlaps the hex flower — fix in polish.
+- needs human verification: whether the power-chord strum feels "tight and heavy" (PRD §7), whether the
+  octave should default on, and that the strip preview / status label match what is heard — needs a real
+  camera + hands + speakers (Phase 7.3 checklist).
+
+## 2026-11-23 14:05 WIB — task 5.1 Karplus-Strong acoustic voice
+
+- did: new Rust engine module `engine/src/pluck.rs` (ADR-0015): extended Karplus-Strong — seeded
+  xorshift noise burst lowpassed by `brightness`, DC-removed + peak-normalised; two-point-average loop
+  filter × loss `ρ = 10^(−3/(t60·f))`; first-order allpass for fractional-delay tuning (δ kept in
+  [0.1,1.1)); output peak-normalised with a 10 ms tail fade. Exported as `renderPluck(...) →
+  Float32Array`. `audio.ts`: voices are now `AudioBufferSourceNode`s playing the rendered buffer through
+  the per-voice gain; renderer injected via `setPluckRenderer` (main.ts installs `renderPluck` once the
+  engine inits); triangle-oscillator fallback before then / on render failure. New pure
+  `acousticPluckParams(freq, velocity, muted)` (ring time by pitch, brightness by velocity, palm-mute
+  params) — `pluck()` takes an optional `muted` flag, ready for the gesture wiring.
+- tested: `cargo test` 118 passed / 0 failed (+12 pluck: length, **pitch < 1 cent** at E2/A2/D3/G3/B3/E4/E5
+  via autocorrelation — measured errors 0.01–0.11 cent, bounded/finite/peak 1, T60 decay band, short-T60
+  thud, silent tail, brightness tilt, determinism + seed-0 remap, no DC, unrenderable → empty, bad params
+  sanitised, wasm export = core). `npm run test` 151 passed (+6 `acousticPluckParams`). typecheck 0,
+  build clean, headless smoke load OK (engine inits, renders).
+- next: wire the 2.3 palm-mute / fist-stop `GestureDetector` into the strum path (small follow-up
+  commit), then task 5.2 electric clean + distortion (Rust waveshaper curve + tone control).
+- needs human verification: whether the KS acoustic voice *sounds* like a guitar on real speakers, the
+  ring-time/brightness feel, and loudness balance across strings — no audio output in this env.
+
+## 2026-11-23 14:15 WIB — wire palm-mute / fist-stop gestures into audio (2.3 follow-up)
+
+- did: the 2.3 `GestureDetector` was cargo-tested but never connected to sound. New pure
+  `src/strumgesture.ts`: `strumGestureAction(prev, cur)` — entering a fist → `stopAll` once, plucks
+  suppressed while the fist is held (so the stop sticks if the closed hand drifts across the strings);
+  open palm → plucks palm-muted (`pluck(i, v, true)` → KS with T60 0.18 s, darker); `modeLabel` adds the
+  modifier to the status bar MODE field ("Power · palm mute", "Chord · stop"). `main.ts` runs the
+  detector (hold 3 frames) on the strum hand's flattened landmarks each frame and resets it on hand loss.
+  No new ADR: realises ADR-0008/0009's planned wiring.
+- tested: `npm run test` 158 passed (+7 strumgesture), typecheck 0, build clean, smoke load OK.
+  `cargo test` unchanged (118).
+- needs human verification: whether a real flat palm / fist reads reliably while strumming and whether
+  palm-muted strums feel right — real camera + hands.
+
+## 2026-11-23 14:35 WIB — task 5.2 electric clean + distortion voice
+
+- did: new engine module `engine/src/distortion.rs` — normalised tanh waveshaper table generator,
+  `distortionCurve(samples, drive)` (ADR-0016). `audio.ts`: voices now feed a bus with two routes —
+  acoustic straight to master, electric through `WaveShaperNode` (4× oversample, curve from the engine,
+  injected via `setCurveGenerator` after init, cached per 1% drive) → lowpass tone → drive-compensation
+  gain. New `Instrument` type (`acoustic | clean | distortion`) + labels + `setInstrument/setDrive/setTone`;
+  clean = drive 0 = shaper pass-through. Pure helpers: `pluckParams(instrument, …)` (electric brighter,
+  longer T60), `toneToCutoff` (exp 700 Hz–12 kHz), `driveCompensation` (1/(1+12·drive)).
+- tested: `cargo test` 127 passed (+9 distortion: length clamp, identity at drive 0, exact ±1 endpoints +
+  silent centre, odd symmetry, monotonic/bounded, gain/saturation rise with drive, sine crest factor
+  √2→<1.1, sanitisation, wasm = core). `npm run test` 168 passed (+10). typecheck 0, build clean.
+  **New in-browser audio check** (scratch Playwright script against the Vite dev server, importing
+  `audio.ts` + the engine, analyser tapped on the master bus, 6-string pluck): all three instruments
+  produce signal; crest factor acoustic 3.4 / clean 4.3 / distortion 1.7 (squared up as expected); RMS
+  0.088 / 0.099 / 0.118 after retuning the compensation from 1/(1+6d) (which left distortion +7 dB).
+  This becomes a real Playwright test in 7.1.
+- next: task 5.3 instrument toggle (on-screen + keyboard), volume, reverb amount.
+- needs human verification: whether the distortion *sounds* good (drive 0.6, tone 0.65 defaults) and the
+  clean electric reads as "electric" on real speakers.
+
+## 2026-11-23 15:00 WIB — task 5.3 instrument toggle, volume, reverb
+
+- did: new engine module `engine/src/reverb.rs` (`reverbImpulse`: pre-delay + exp-decay noise, darkening
+  lowpass, unit energy; stereo via two seeds) — ADR-0017. `audio.ts`: instrument routes → mix → dry +
+  convolver/wet → master; `setVolume` (`volumeToGain` = 0.55·v²), `setReverb` (`reverbMix`), injected
+  `setImpulseGenerator`. New `src/controls.ts`: DOM panel (3 instrument buttons with `aria-pressed`,
+  volume + reverb range sliders), keyboard `1`/`2`/`3`/`I` via pure `instrumentForKey` /
+  `nextInstrument`. Status-bar INSTRUMENT shows the live instrument. Phase 5 complete.
+- tested: `cargo test` 135 passed (+8 reverb: length, silent pre-delay, unit energy, ~−30 dB at half the
+  RT60, tail darkening with damping (flat without), determinism + L/R decorrelation, sanitisation, wasm =
+  core). `npm run test` 180 passed (+12: controls key map/cycle, volume curve, reverb mix). In-browser
+  (scratch Playwright vs Vite dev server): reverb tail RMS 250 ms after `stopAll` = 0 dry vs 0.041 wet;
+  volume 1 vs 0.5 = 4.1× RMS (squared curve), 0 = silent; real app: key `3` → distortion, `I` → acoustic,
+  click → clean, status bar follows.
+- found: **use-after-free on page unload** — `beforeunload` frees the wasm objects but the rAF loop runs
+  one more frame → "null pointer passed to rust". Pre-existing since 2.4; fixing in the next commit.
+- cosmetic (polish): the controls panel overlaps the right end of the bottom string.
+- needs human verification: reverb character / default amount, slider feel, on real speakers.
+
+## 2026-11-23 15:05 WIB — fix: render loop used freed wasm objects on unload
+
+- did: `beforeunload` freed every wasm object while the rAF render loop could still run one more frame →
+  "null pointer passed to rust" page error (reproduced by dispatching `beforeunload` in headless
+  Chromium). `main.ts` now sets a `disposed` flag (and `engineReady = false`) *before* the frees and
+  `render()` returns immediately once disposed.
+- tested: the scratch repro script now reports no page errors after `beforeunload`; typecheck 0,
+  `npm run test` 180 passed. Regression coverage: add a "dispatch beforeunload → no page error" case to
+  the Playwright suite in task 7.1 (it needs a real browser + wasm, so it can't live in vitest).
+
+## 2026-11-23 15:30 WIB — task 6.1 first-run calibration
+
+- did: new pure `src/calibration.ts` (ADR-0018): `CalibrationSession` (intro 3 s → left 8 s → right 8 s →
+  done 1.5 s, records the active hand's normalised palm centre), `robustRange` (5–95th percentile box,
+  ≥ 30 samples), `calibratedZones` (pad 15%, minimum size, clamp into own half below the bar),
+  `validateCalibration`, plus canvas `drawCalibrationOverlay` (dim, half highlight, live dashed range box,
+  prompt + countdown, progress bar). New `src/storage.ts` (guarded localStorage JSON load/save, injectable
+  store). `main.ts`: zones computed per frame from the calibration; strings / strum detector / strip+hex
+  layout use them; auto-start on first run once tracking is live; Esc cancels; strum paused during
+  calibration and detector reset after; result merged with the previous one and saved. Controls panel
+  gains a Calibrate button.
+- tested: `npm run test` 203 passed (+23: storage round-trip / malformed / throwing store; robustRange
+  sample floor, coverage, outlier rejection, clamping; session phase schedule, ~20 s total, per-phase
+  recording, result with a missing hand, countdown + live box, NaN clock; validation; zones default,
+  fitting, half/bar clamping, minimum growth, missing hand, degenerate canvas). typecheck 0, build clean,
+  `cargo test` 135 unchanged. Browser: with a calibration injected into localStorage the strings band and
+  hex/strip visibly refit; Calibrate button present; overlay rendered on a test canvas and reviewed.
+- limitation here: MediaPipe assets are unreachable from this sandbox (CDN blocked), so the live flow
+  can't start in headless tests.
+- needs human verification: do the full 20 s flow with real hands — are the prompts clear, are 8 s per
+  hand enough, do the fitted zones feel comfortable (padding/minimums)?
+
+## 2026-11-23 16:10 WIB — task 6.2 settings panel (handedness, sensitivity, persistence)
+
+- did: (ADR-0019) new pure `src/settings.ts` (Settings type/defaults, field-wise `validateSettings`,
+  `strumMinVelocity`, `smoothingMinCutoff`, `hexScale`). Engine: `StrumCore::set_min_velocity` /
+  `StrumDetector.setMinVelocity` (strum threshold). `handedness.ts`: `leftHanded` option +
+  `LEFT_HANDED_ROLE`. `calibration.ts`: boxes renamed `chord`/`strum` (+ phases), `leftHanded` recorded,
+  `mirrorBox`, handedness-aware `calibratedZones` and `calibrationPrompt`. `hud.ts` / `placeholder.ts`:
+  tints and zone labels follow handedness; labels moved to just under the status bar (fixes the noted
+  overlap with the hex flower). `controls.ts` rewritten around `Settings` + `onChange(patch)`: collapsible
+  Settings section (left-handed, power octave, strum threshold, smoothing, hex size, reset); panel docks
+  on the strum side. `main.ts` loads/saves settings and applies them (audio, filters rebuilt on smoothing
+  change, detectors re-seeded on handedness change, threshold + hex scale per frame, power octave).
+- tested: `cargo test` 140 passed (+5 strum threshold: off by default, slow ignored / fast fires, slow
+  line never fires late, sanitised, equal-to-threshold fires). `npm run test` 225 passed (+22: settings
+  validation/mappings, left-handed assignment, left-handed zones/mirroring/prompts). typecheck 0, build
+  clean. Browser: Settings opens; left-handed swaps strings/flower/labels and moves the panel left; hex
+  size 0 shrinks the flower; settings JSON saved and restored after reload; no page errors.
+- needs human verification: default strum threshold (does it kill accidental plucks without eating soft
+  strums?), smoothing range feel, left-handed play with real hands.
+
+## 2026-11-23 16:35 WIB — task 6.3 lighting / out-of-frame warning banners
+
+- did: new pure `src/warnings.ts` (ADR-0020): `rawConditions` (dark / lowConfidence / noHands /
+  chordMissing / strumMissing / chordEdge / strumEdge), `WarningMonitor` (1.0 s onset, 0.6 s release,
+  priority order), `warningMessage` (handedness-aware hand names), `meanLuma` (Rec.601), `nearFrameEdge`,
+  plus canvas `drawWarningBanners` (≤ 2 amber pills, bottom-centre). `main.ts` samples frame luma every
+  15 frames from a 32×18 offscreen canvas, maps each hand's landmarks through the cover-crop+mirror to test
+  edge proximity, runs the monitor while tracking is live (reset during calibration), draws banners.
+- tested: `npm run test` 242 passed (+17: conditions incl. noHands suppressing "missing", monitor onset /
+  no single-frame flash / release without flicker / priority / reset, messages, luma maths, edge test).
+  typecheck 0, build clean, `cargo test` 140 unchanged. Browser: banners rendered on a test canvas and
+  reviewed; `meanLuma` on real canvas pixel data (rgb 20,20,20 → 0.078, i.e. "dark"); full app runs
+  with the luma sampler and shows no page errors.
+- needs human verification: whether 0.15 luma / 0.55 score match "too dark" on a real webcam (auto-
+  exposure varies a lot), and whether the edge banner fires at a sensible point.
+
+## 2026-11-23 17:00 WIB — task 6.4 keyboard fallback (camera-free demo/debug mode)
+
+- did: new pure `src/keyboard.ts` (ADR-0021): `keyAction` (A–G major, Shift+letter minor, Space down,
+  Shift+Space up; ignores modifiers/repeat/other keys), `rakeSchedule` (6 strings, 12 ms apart, lighter
+  upstroke), `KEYBOARD_HELP`. `audio.ts` `pluck()` gains a `delay` (scheduled on the audio clock).
+  `strings.ts`: `drawStrings(…, glow)` + pure `stringGlow`. `main.ts`: keydown listener (skipped while an
+  input has focus), `keyboardChord` → latch pending + Chord mode, `keyboardStrum` → shared
+  `strumBoundary()` + rake; hand strums now also use `strumBoundary()` and feed the glow; flower shows the
+  pending chord when no hand is on it; camera-error panel lists the keys and collapses to a notice
+  (`drawNotice`) after the first key. Settings section shows the key help.
+- tested: `npm run test` 253 passed (+11: key mapping incl. modifiers/repeat/collisions, rake order /
+  timing / upstroke velocity, glow fade). typecheck 0, build clean, `cargo test` 140 unchanged.
+  Browser: with fake camera `C` + Space → status CHORD "C", strings glow, C cell highlighted; with the
+  camera denied → error panel with key help, `Shift+A` + Space → "Am", panel shrinks to a notice; no
+  page errors. Phase 6 complete.
+- next: Phase 7 — 7.1 Playwright e2e (C–G–Am–F via keyboard, assert audio), 7.2 latency harness,
+  7.3 README.
+
+## 2026-11-23 17:30 WIB — task 7.1 Playwright end-to-end suite
+
+- did: (ADR-0022) `@playwright/test@1.63.0` (matches the preinstalled browser). `playwright.config.ts`
+  (production build + `vite preview` webServer, Chromium with fake media device/UI and a fake video
+  file), `e2e/fake-video.ts` (generates a 160×120×30 Y4M into the temp dir), `e2e/app.spec.ts` (6
+  tests). Audio engine observability: `stats` (voices started, last voice time), `outputLevel()`
+  (AnalyserNode RMS on master), `currentChord()`, `clock()`; read-only `window.__strhapshody.state()`
+  hook in `main.ts`. `npm run test:e2e` = build engine + playwright. TESTING.md updated.
+- tested: `npm run test:e2e` → 6 passed (8 s): camera live from the fake file + engine ready; C–G–Am–F
+  — each strum sets the label, loads 5/6/5/6 sounding strings with the right lowest note (C3/G2/A2/F2),
+  starts exactly that many voices and puts signal on the master (RMS > 0.005); chord change waits for
+  the strum; upstroke on acoustic/clean/distortion (6 voices + signal each); left-handed setting survives
+  reload; unload regression. **Mutation check:** reverting the unload fix makes that test fail with
+  "null pointer passed to rust". `npm run test` 253, `cargo test` 140, typecheck 0.
+- next: 7.2 latency harness, 7.3 README.
+
+## 2026-11-23 18:00 WIB — task 7.2 latency measurement harness
+
+- did: (ADR-0023) pure `src/latency.ts` (`LatencySample`, `audibleMs` via getOutputTimestamp with a
+  base+output-latency fallback, `strumLatencyMs`, `processingMs`, `endToEndLatencyMs`, nearest-rank
+  `summarize`, `latencyVerdict`, `LatencyLog` ring buffer). Audio engine `clock()` now includes
+  `getOutputTimestamp()`. `main.ts` records a sample at every strum boundary (keyboard: key event
+  `timeStamp`; hand: detection time + the frame's camera `captureTime` from `requestVideoFrameCallback`),
+  exposes `__strhapshody.latency()`, and draws a live readout with `?latency`. New harness
+  `e2e/latency.spec.ts` (60 strums, C/G/Am/F cycle) → console summary + `test-results/latency.json`,
+  fails if p95 ≥ 100 ms.
+- **measured (headless Chromium 157, fake audio device: baseLatency 10 ms, outputLatency 32 ms):**
+  - strum → sound: **p50 37.3 ms · p95 45.0 ms · max 48.2 ms** (n=60) → *ideal* (< 60 ms).
+  - JS processing (key event → voices scheduled): p50 11.3 ms · p95 22.9 ms · max 32.4 ms.
+  - Karplus-Strong render + AudioBuffer fill for a 6-string strum, measured separately: p50 10.6 ms ·
+    p95 15.0 ms — i.e. nearly all of the processing time. Optimisation candidate (next commit).
+  - camera → sound: not measurable here (no camera). Expected budget on real hardware: the above +
+    frame wait (≤ 33 ms at 30 fps) + MediaPipe inference (~10–30 ms) + up to one rAF ≈ 80–110 ms, i.e.
+    right at the 100 ms target → **needs human verification** with `?latency`.
+- tested: `npm run test` 264 passed (+11 latency), e2e 7 passed (incl. the harness), typecheck 0,
+  `cargo test` 140.
+
+## 2026-11-23 18:25 WIB — perf: cache rendered pluck buffers; fix: latency estimator under-counted processing
+
+- found: the 7.2 estimator took the first voice's start from `currentTime` read at detection. When the JS
+  work (mostly the Karplus-Strong render) outlasts the audio thread's lead, that start is already past
+  when the command arrives and the voice really begins on the next quantum — so processing time was
+  partly hidden (the cache below cut processing by ~10 ms yet "strum→sound" barely moved, which exposed
+  it). `audibleMs` now takes the later of the output-timestamp mapping and *scheduling finished +
+  reported base/output latency* (new unit test for the processing-dominated case). **The 7.2 entry's
+  p50 37 / p95 45 ms figures were optimistic**; corrected numbers below.
+- did: `src/lru.ts` (generic LRU, tested) + an AudioBuffer cache in the audio engine keyed by
+  `pluckCacheKey` (pitch, T60, duration, brightness snapped to 0.05 — `quantizeBrightness` — sample rate,
+  seed variant); 3 seed variants rotate so repeat strums aren't sample-identical; capacity 72 (≤ ~45 MB).
+  Cache cleared when the renderer changes.
+- measured (headless Chromium 157, fake device: base 10 ms + output 32 ms, 60 keyboard strums, corrected
+  estimator):
+  - cache disabled: strum→sound **p50 53.2 · p95 60.0 · max 61.6 ms**; processing p50 11.2 · p95 18.0 ms.
+  - cache on: strum→sound **p50 43.1 · p95 50.5 · max 54.5 ms** (ideal < 60); processing p50 1.1 · p95
+    8.5 ms (the p95 is the first strum of each new chord, which still renders).
+  - About 42 ms of the remaining figure is the (fake) device's reported base + output latency; real
+    hardware will differ. Camera → sound still needs a real camera (`?latency`).
+- tested: `npm run test` 271 passed (+6 lru, +2 cache keys, +1 latency), e2e 7 passed, typecheck 0.
+
+## 2026-11-23 18:45 WIB — task 7.3 README (setup, limitations, manual checklist)
+
+- did: rewrote `README.md` from a one-line stub: what it is, how to play (layout diagram, left/right hand
+  tables, calibration, keyboard keys, panel/settings, `?latency`), setup from zero (Node ≥ 22.12 — vitest 5
+  requires it — rustup + wasm32 target + wasm-pack, `npm install`, `build:engine`, `dev`), production
+  build, test commands, troubleshooting (camera, MediaPipe offline, autoplay, the old-`wasm-opt`
+  instantiate error found this session, swapped zones → `DEFAULT_HANDEDNESS_ROLE`, esbuild warning),
+  known limitations (no human/camera testing yet, latency numbers, CDN, browsers, no Tauri), and a manual
+  test checklist for Yaya built from every "needs human verification" note in this log, ending with the
+  `?latency` numbers to report back. Phase 7 / all MVP boxes complete.
+- tested: `cargo test` 140, `npm run test` 271, `npm run test:e2e` 7 (incl. latency harness), typecheck,
+  build — all green. Fresh-clone check of the README steps: see next entry.
+
+## 2026-11-23 18:55 WIB — session wrap-up (cloud session: 4.3 → 7.3, MVP task list complete)
+
+- fresh-clone check: cloned the pushed branch into a scratch dir and followed the README literally —
+  `npm install`, `npm run build:engine`, `npm run build`, `npm run test:all` (140 + 271 green),
+  `vite preview` serves 200. The instructions work as written (given Node ≥ 22.12, rustup, the wasm32
+  target and wasm-pack).
+- this session: 4.3 power-mode strum + label; 5.1 Karplus-Strong voice; palm-mute/fist wiring (2.3
+  follow-up); 5.2 electric + distortion; 5.3 instrument/volume/reverb; unload use-after-free fix; 6.1
+  calibration; 6.2 settings; 6.3 warnings; 6.4 keyboard fallback; 7.1 Playwright e2e; 7.2 latency
+  harness (+ estimator fix and pluck-buffer cache); 7.3 README. ADR-0014 … ADR-0023.
+- state: every Phase 0–7 box in TASKS.md is checked; `cargo test` 140, vitest 271, Playwright 7, all
+  green. Work is pushed to the session branch `ccr-40dc167e-kbawaf`, **not yet merged to `main`** — the
+  CLAUDE.md definition of done says `origin/main`; merging needs the owner's go-ahead (PR or direct).
+- environment notes for future cloud sessions: install `rustup target add wasm32-unknown-unknown`,
+  `cargo install wasm-pack`, and a recent binaryen (`npm i -g binaryen`) — apt's binaryen 108 produces a
+  wasm that fails to instantiate. The MediaPipe CDN is unreachable from the sandbox, so live tracking can
+  only be checked on a real machine.
+- next: (1) Yaya runs the README manual checklist with a real webcam and reports results / `?latency`
+  numbers — then tune thresholds (gesture/finger-count, strum threshold, warning thresholds, smoothing)
+  from that feedback, and flip `DEFAULT_HANDEDNESS_ROLE` if the zones are swapped; (2) merge to `main`;
+  (3) post-MVP P.1 Tauri wrapper needs Yaya to run `sudo pacman -S webkit2gtk-4.1 libappindicator-gtk3
+  librsvg patchelf` first; P.2 stretch items.
+- needs human verification: everything in the README "Manual test checklist".

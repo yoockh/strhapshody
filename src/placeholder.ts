@@ -16,6 +16,8 @@
  *    message box for the graceful "no camera / permission denied" path.
  */
 
+import { statusBarHeight } from "./hud.ts";
+
 const BAR_COLORS = [
   "#3a4a5a",
   "#44566a",
@@ -57,6 +59,7 @@ export function drawZoneOverlay(
   width: number,
   height: number,
   caption?: string,
+  leftHanded = false,
 ): void {
   const midX = width / 2;
 
@@ -70,13 +73,19 @@ export function drawZoneOverlay(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Zone labels (PRD §5: left hand = chords, right hand = strum).
-  ctx.fillStyle = "rgba(232, 234, 237, 0.85)";
+  // Zone labels (PRD §5: left hand = chords, right hand = strum; swapped for
+  // left-handed players). Small, just under the status bar, so they never sit
+  // on top of the hex flower or the strings.
+  ctx.fillStyle = "rgba(232, 234, 237, 0.6)";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `600 ${Math.round(height * 0.035)}px system-ui, sans-serif`;
-  ctx.fillText("LEFT HAND · chords", midX / 2, height * 0.5);
-  ctx.fillText("RIGHT HAND · strum", midX + midX / 2, height * 0.5);
+  ctx.font = `600 ${Math.max(10, Math.round(height * 0.02))}px system-ui, sans-serif`;
+  const labelY = statusBarHeight(height) + Math.max(10, height * 0.025);
+  const [leftLabel, rightLabel] = leftHanded
+    ? ["LEFT HAND · strum", "RIGHT HAND · chords"]
+    : ["LEFT HAND · chords", "RIGHT HAND · strum"];
+  ctx.fillText(leftLabel, midX / 2, labelY);
+  ctx.fillText(rightLabel, midX + midX / 2, labelY);
 
   // Optional status caption (e.g. "starting camera…"). Omitted once the live
   // feed is showing, so we don't label a real camera frame as a placeholder.
@@ -182,4 +191,35 @@ function roundedRect(
   ctx.arcTo(x, y + h, x, y, radius);
   ctx.arcTo(x, y, x + w, y, radius);
   ctx.closePath();
+}
+
+/**
+ * A compact one-line notice pill, top-centre just under the zone labels — the
+ * shrunk form of the camera error once the player is using the keyboard
+ * fallback (task 6.4), so it no longer covers the hex flower. (DOM glue.)
+ */
+export function drawNotice(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  text: string,
+): void {
+  const fontSize = Math.max(11, Math.round(height * 0.02));
+  ctx.save();
+  ctx.font = `600 ${fontSize}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const h = fontSize * 1.9;
+  const w = Math.min(width - 24, ctx.measureText(text).width + fontSize * 2);
+  const y = statusBarHeight(height) + Math.max(10, height * 0.025) + fontSize * 1.4;
+  ctx.fillStyle = "rgba(60, 14, 14, 0.85)";
+  ctx.strokeStyle = "rgba(240, 120, 120, 0.8)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect((width - w) / 2, y, w, h, h / 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#f5c4c4";
+  ctx.fillText(text, width / 2, y + h / 2, w - fontSize);
+  ctx.restore();
 }
