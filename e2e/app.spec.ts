@@ -147,3 +147,46 @@ test("unload doesn't call into freed wasm objects", async ({ page }) => {
   await page.waitForTimeout(300);
   expect(errors).toEqual([]);
 });
+
+// Regression (2026-11-24, first real-webcam run): a calibration recorded with
+// the hands resting near the bottom of the frame squeezed the strings into the
+// bottom corner. Such ranges are now rejected, also when loaded from storage.
+test("a resting-hand calibration is ignored; Reset calibration clears a good one", async ({
+  page,
+}) => {
+  const KEY = "strhapshody.calibration.v1";
+  await page.goto("/");
+  await page.evaluate((key) => {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        chord: { left: 0.34, top: 0.91, right: 0.36, bottom: 0.93 },
+        strum: { left: 0.59, top: 0.92, right: 0.61, bottom: 0.94 },
+        leftHanded: false,
+      }),
+    );
+  }, KEY);
+  await page.reload();
+  await expect.poll(async () => (await state(page)).engineReady, { timeout: 15_000 }).toBe(true);
+  expect((await page.evaluate(() => window.__strhapshody!.state().calibrated))).toBe(false);
+
+  await page.evaluate((key) => {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        chord: { left: 0.08, top: 0.35, right: 0.38, bottom: 0.9 },
+        strum: { left: 0.62, top: 0.3, right: 0.9, bottom: 0.75 },
+        leftHanded: false,
+      }),
+    );
+  }, KEY);
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__strhapshody!.state().calibrated)).toBe(true);
+
+  await page.click("#controls .settings-toggle");
+  await page.click("#controls .reset-calibration");
+  expect(await page.evaluate(() => window.__strhapshody!.state().calibrated)).toBe(false);
+  expect(await page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+});

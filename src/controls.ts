@@ -59,6 +59,8 @@ export interface ControlsBinding {
   onChange(patch: Partial<Settings>): void;
   /** Rerun calibration (task 6.1); omit to hide the button. */
   onCalibrate?: () => void;
+  /** Forget the saved calibration (zones back to the defaults). */
+  onResetCalibration?: () => void;
 }
 
 /** Handle for keeping the panel in sync when state changes elsewhere. */
@@ -197,6 +199,19 @@ export function mountControls(parent: HTMLElement, binding: ControlsBinding): Co
     reset.blur();
   });
   section.append(reset);
+  if (binding.onResetCalibration) {
+    const onResetCalibration = binding.onResetCalibration;
+    const resetCal = document.createElement("button");
+    resetCal.type = "button";
+    resetCal.className = "reset-calibration";
+    resetCal.textContent = "Reset calibration";
+    resetCal.title = "Forget your saved hand ranges and go back to the default zones";
+    resetCal.addEventListener("click", () => {
+      onResetCalibration();
+      resetCal.blur();
+    });
+    section.append(resetCal);
+  }
   const help = document.createElement("p");
   help.className = "hint";
   help.textContent = KEYBOARD_HELP;

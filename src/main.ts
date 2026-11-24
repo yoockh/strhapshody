@@ -82,7 +82,7 @@ import {
   type Calibration,
   type PlayZones,
 } from "./calibration.ts";
-import { browserStorage, loadJSON, saveJSON } from "./storage.ts";
+import { browserStorage, loadJSON, removeKey, saveJSON } from "./storage.ts";
 import {
   drawWarningBanners,
   meanLuma,
@@ -388,6 +388,11 @@ mountControls(document.body, {
   settings,
   onChange: applySettings,
   onCalibrate: () => startCalibration(),
+  onResetCalibration: () => {
+    calibration = null;
+    removeKey(storage, CALIBRATION_STORAGE_KEY);
+    strumDetector?.reset();
+  },
 });
 
 // Resume audio on the first user interaction (pointer or key), once.
@@ -1010,6 +1015,7 @@ window.__strhapshody = {
     chord: audioEngine?.currentChord() ?? [],
     clock: audioEngine?.clock() ?? null,
     calibrating: calibrationSession !== null,
+    calibrated: calibration !== null,
     leftHanded: settings.leftHanded,
   }),
   latency: () => ({ ...latencyLog.report(), count: latencyLog.samples().length }),

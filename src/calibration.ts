@@ -62,6 +62,35 @@ const PHASE_ORDER: readonly CalibrationPhase[] = ["intro", "chord", "strum", "do
 export const MIN_SAMPLES = 30;
 /** Samples needed before the live range box is drawn. */
 const LIVE_MIN_SAMPLES = 8;
+/**
+ * Minimum movement for a recorded range to count, as a fraction of the frame.
+ * A hand that barely moved (resting on the desk, or a player who didn't
+ * understand the prompt) would otherwise shrink its zone to the minimum size
+ * around that one spot — e.g. strings squeezed into the bottom corner. Such a
+ * range is rejected and the hand keeps its default (or previous) zone.
+ */
+export const MIN_CHORD_SPAN = 0.12; // in both x and y
+export const MIN_STRUM_SPAN = 0.15; // vertical (the strum direction)
+
+/** The chord-hand range, or null if it didn't roam far enough to trust. */
+export function usableChordRange(box: NormBox | null): NormBox | null {
+  if (!box) return null;
+  return box.right - box.left >= MIN_CHORD_SPAN && box.bottom - box.top >= MIN_CHORD_SPAN
+    ? box
+    : null;
+}
+
+/** The strum-hand range, or null if it didn't sweep far enough vertically. */
+export function usableStrumRange(box: NormBox | null): NormBox | null {
+  if (!box) return null;
+  return box.bottom - box.top >= MIN_STRUM_SPAN ? box : null;
+}
+
+/** Which hands produced a usable range (shown at the end of calibration). */
+export interface CalibrationOutcome {
+  readonly chord: boolean;
+  readonly strum: boolean;
+}
 
 /** What the overlay needs to draw this frame. */
 export interface CalibrationView {
@@ -74,6 +103,8 @@ export interface CalibrationView {
   readonly liveBox: NormBox | null;
   /** True once the flow has finished (after the done phase). */
   readonly finished: boolean;
+  /** During/after the done phase: which hands gave a usable range. */
+  readonly outcome: CalibrationOutcome | null;
 }
 
 function percentile(sorted: readonly number[], p: number): number {
@@ -132,6 +163,7 @@ export class CalibrationSession {
       secondsLeft: PHASE_SECONDS.intro,
       liveBox: null,
       finished: false,
+      outcome: null,
     };
   }
 
@@ -169,6 +201,7 @@ export class CalibrationSession {
       secondsLeft: finished ? 0 : Math.ceil(len - inPhase),
       liveBox: samples ? robustRange(samples, LIVE_MIN_SAMPLES) : null,
       finished,
+      outcome: phase === "done" || finished ? this.outcome() : null,
     };
     return this.lastView;
   }
@@ -187,10 +220,16 @@ export class CalibrationSession {
   result(leftHanded = false): Calibration {
     return {
       version: 1,
-      chord: robustRange(this.chordSamples),
-      strum: robustRange(this.strumSamples),
+      chord: usableChordRange(robustRange(this.chordSamples)),
+      strum: usableStrumRange(robustRange(this.strumSamples)),
       leftHanded,
     };
+  }
+
+  /** Which hands gave a usable range so far. */
+  outcome(): CalibrationOutcome {
+    const r = this.result();
+    return { chord: r.chord !== null, strum: r.strum !== null };
   }
 }
 
@@ -215,8 +254,12 @@ export function validateCalibration(raw: unknown): Calibration | null {
   const chord = r.chord === null ? null : validBox(r.chord);
   const strum = r.strum === null ? null : validBox(r.strum);
   if ((r.chord !== null && !chord) || (r.strum !== null && !strum)) return null;
-  if (!chord && !strum) return null;
-  return { version: 1, chord, strum, leftHanded: r.leftHanded === true };
+  // Apply the same movement thresholds as a fresh calibration, so a range
+  // saved before they existed (a resting hand) falls back to the default zone.
+  const usableChord = usableChordRange(chord);
+  const usableStrum = usableStrumRange(strum);
+  if (!usableChord && !usableStrum) return null;
+  return { version: 1, chord: usableChord, strum: usableStrum, leftHanded: r.leftHanded === true };
 }
 
 /** Canvas-pixel play zones. */
@@ -313,6 +356,7 @@ export function calibratedZones(
 export function calibrationPrompt(
   phase: CalibrationPhase,
   leftHanded = false,
+  outcome: CalibrationOutcome | null = null,
 ): readonly [string, string] {
   const chordHand = leftHanded ? "right" : "left";
   const strumHand = leftHanded ? "left" : "right";
@@ -325,15 +369,28 @@ export function calibrationPrompt(
     case "chord":
       return [
         `${chordHand === "left" ? "Left" : "Right"} hand`,
-        `Move your ${chordHand} hand around the area you'd comfortably reach for chords.`,
+        `Hold your ${chordHand} hand up at shoulder height and move it slowly around — up, down, side to side.`,
       ];
     case "strum":
       return [
         `${strumHand === "left" ? "Left" : "Right"} hand`,
-        `Strum your ${strumHand} hand up and down through its full comfortable range.`,
+        `Sweep your ${strumHand} hand up and down in big strums, from chest to belly height.`,
       ];
-    default:
-      return ["Done", "Zones resized to your reach. Press the Calibrate button to redo it."];
+    default: {
+      if (!outcome || (outcome.chord && outcome.strum)) {
+        return ["Done", "Zones resized to your reach. Press Calibrate to redo it."];
+      }
+      const missed = [
+        !outcome.chord ? `${chordHand} hand` : null,
+        !outcome.strum ? `${strumHand} hand` : null,
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      return [
+        "Done",
+        `Not enough movement seen from your ${missed} — kept the default zone. Press Calibrate to try again.`,
+      ];
+    }
   }
 }
 
@@ -368,7 +425,7 @@ export function drawCalibrationOverlay(
     ctx.setLineDash([]);
   }
 
-  const [title, body] = calibrationPrompt(view.phase, leftHanded);
+  const [title, body] = calibrationPrompt(view.phase, leftHanded, view.outcome);
   const cx = width / 2;
   const cy = height * 0.42;
   ctx.textAlign = "center";

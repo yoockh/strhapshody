@@ -958,3 +958,24 @@ optionalDependencies and both build and dev server work. If a future esbuild err
   ("the maintainer", "the project owner") without changing any decision or meaning. README's checklist
   now asks testers to open a GitHub issue; footer reworded. Earlier wording remains in git history.
 - tested: repo-wide scan finds no remaining personal references; `npm run test` 271 passed.
+
+## 2026-11-24 10:00 WIB — fix: calibration from a resting hand squeezed the zones into a corner
+
+- found (first real-webcam run by the maintainer): the strings sat in a small band at the bottom of the
+  right half and the hex flower was small and low. The band matched the zone *minimum* size exactly
+  (strings ~473×396 px on a 1892×946 canvas), i.e. both recorded ranges were tiny and near the bottom of
+  the frame — the hands had barely moved during calibration (resting, or the prompts weren't clear), and
+  `calibratedZones` grew each tiny box to the minimum around that spot.
+- did: `calibration.ts` — a recorded range must span ≥ 12% of the frame in x and y (chord hand) or
+  ≥ 15% vertically (strum hand), else it's rejected and the hand keeps its default/previous zone
+  (`usableChordRange` / `usableStrumRange`). The same check runs in `validateCalibration`, so an
+  already-saved bad calibration (like the maintainer's) is ignored on the next load — no manual step.
+  The done screen now says which hand didn't move enough; the chord/strum prompts say concretely what
+  to do ("shoulder height … move slowly around", "big strums, chest to belly"). Settings gain
+  **Reset calibration**; the debug hook exposes `calibrated`.
+- tested: `npm run test` 276 passed (+5: resting-hand session → no usable range and default zones,
+  done-view outcome + prompt, thresholds, stored bad calibration → null, mixed stored calibration);
+  e2e 8 passed (+1: saved resting-hand calibration ignored, good one applied, Reset clears it).
+  `cargo test` 140 unchanged.
+- needs human verification: rerun calibration with real hands — do the new prompts make the motion
+  clear, and are the 12% / 15% thresholds lenient enough for small natural movements?
